@@ -383,7 +383,8 @@ export default {
                         steps.push({
                             step: stepNum++,
                             type: 'winding',
-                            description: `Wind ${toTitleCase(windingName)}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
+                            windingName: windingName,
+                            description: `Wind ${toTitleCase(windingName.toLowerCase())}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
                             icon: 'fa-rotate'
                         });
                     }
@@ -410,7 +411,8 @@ export default {
                         steps.push({
                             step: stepNum++,
                             type: 'winding',
-                            description: `Wind ${toTitleCase(windingName)}: ${totalTurns} turns`,
+                            windingName: windingName,
+                            description: `Wind ${toTitleCase(windingName.toLowerCase())}: ${totalTurns} turns`,
                             icon: 'fa-rotate'
                         });
                     }
@@ -418,6 +420,43 @@ export default {
             }
             
             return steps;
+        },
+        windingTerminations() {
+            const coil = this.mas?.magnetic?.coil;
+            const windings = coil?.functionalDescription || [];
+            if (windings.length === 0) {
+                return [];
+            }
+            // One termination per connection, grouped by winding. Winding order follows
+            // the construction sequence (the order each winding is wound) so this section
+            // reads in step with Winding Construction Steps above it.
+            const order = [];
+            this.windingConstructionSteps.forEach((s) => {
+                if (s.type === 'winding' && s.windingName && !order.includes(s.windingName)) {
+                    order.push(s.windingName);
+                }
+            });
+            windings.forEach((w) => {
+                if (w?.name && !order.includes(w.name)) {
+                    order.push(w.name);
+                }
+            });
+            const result = [];
+            order.forEach((wname) => {
+                const winding = windings.find(w => w.name === wname);
+                (winding?.connections || []).forEach((c) => {
+                    const type = c.type || 'Pin';
+                    const location = (c.pinName != null && c.pinName !== '') ? c.pinName : '?';
+                    result.push({
+                        step: result.length + 1,
+                        type: 'connection',
+                        windingName: wname,
+                        description: `${toTitleCase(wname.toLowerCase())} to ${type} ${location}`,
+                        icon: 'fa-plug'
+                    });
+                });
+            });
+            return result;
         },
         performanceData() {
             const data = [];
@@ -960,6 +999,21 @@ export default {
                 </div>
             </div>
 
+            <!-- Winding Termination -->
+            <div class="section" v-if="isWoundMagnetic && windingTerminations.length > 0">
+                <h3 class="section-title"><i class="fa-solid fa-plug"></i>Winding Termination</h3>
+                <div class="construction-steps">
+                    <div v-for="step in windingTerminations" :key="step.step"
+                         class="construction-step step-connection">
+                        <div class="step-number">{{ step.step }}</div>
+                        <div class="step-icon">
+                            <i :class="'fa-solid ' + step.icon"></i>
+                        </div>
+                        <div class="step-description">{{ step.description }}</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="document-footer">
                 <i class="fa-solid fa-circle-info"></i>
                 <span>Auto-generated from design specs and simulation. Verify before production use.</span>
@@ -1327,6 +1381,11 @@ export default {
 .construction-step.step-winding {
     background: rgba(var(--bs-primary-rgb), 0.1);
     border-left-color: var(--bs-primary);
+}
+
+.construction-step.step-connection {
+    background: rgba(var(--bs-success-rgb), 0.1);
+    border-left-color: rgb(var(--bs-success-rgb));
 }
 
 .step-number {
