@@ -346,7 +346,8 @@ export default {
                             description: thickness && thickness.label > 0
                                 ? `Apply ${material} (${removeTrailingZeroes(thickness.label, 2)} ${thickness.unit})` 
                                 : `Apply ${material}`,
-                            icon: 'fa-tape'
+                            icon: 'fa-tape',
+                            isolation: null
                         });
                     } else if (layerType === 'conduction') {
                         const partialWinding = layer.partialWindings?.[0];
@@ -384,7 +385,8 @@ export default {
                             step: stepNum++,
                             type: 'winding',
                             description: `Wind ${toTitleCase(windingName)}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
-                            icon: 'fa-rotate'
+                            icon: 'fa-rotate',
+                            isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
                 });
@@ -399,7 +401,8 @@ export default {
                             step: stepNum++,
                             type: 'insulation',
                             description: 'Apply insulation layer',
-                            icon: 'fa-tape'
+                            icon: 'fa-tape',
+                            isolation: null
                         });
                     } else if (sectionType === 'conduction') {
                         const partialWinding = section.partialWindings?.[0];
@@ -411,7 +414,8 @@ export default {
                             step: stepNum++,
                             type: 'winding',
                             description: `Wind ${toTitleCase(windingName)}: ${totalTurns} turns`,
-                            icon: 'fa-rotate'
+                            icon: 'fa-rotate',
+                            isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
                 });
@@ -956,6 +960,9 @@ export default {
                             <i :class="'fa-solid ' + step.icon"></i>
                         </div>
                         <div class="step-description">{{ step.description }}</div>
+                        <div v-if="step.isolation" class="step-isolation" :title="'Isolation side: ' + step.isolation">
+                            <i class="fa-solid fa-shield-halved"></i>{{ step.isolation }}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1361,6 +1368,21 @@ export default {
 .step-description {
     font-size: 11px;
     color: #d4d4d4;
+}
+
+.step-isolation {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgb(var(--bs-info-rgb));
+    background: rgba(var(--bs-info-rgb), 0.12);
+    border-radius: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* Operating Point Excitation */
