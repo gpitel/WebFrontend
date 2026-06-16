@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useMasStore } from '../../stores/mas'
-import { toTitleCase, toPascalCase, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, toPascalCase, deepCopy, combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
 import { tooltipsMagneticSynthesisDesignRequirements } from '/WebSharedComponents/assets/js/texts.js'
 import { defaultDesignRequirements, compulsoryRequirements, designRequirementsOrdered, isolationSideOrdered, IsolationSideOrdered, minimumMaximumScalePerParameter} from '/WebSharedComponents/assets/js/defaults.js'
 import { Market, ConnectionType, Topologies } from '/WebSharedComponents/assets/ts/MAS.ts'
@@ -79,6 +79,20 @@ export default {
                 shortenedLabels[value] = label;
             })
             return shortenedLabels
+        },
+        // Terminal-type mode; defaults to Basic so pre-flag persisted state stays locked.
+        terminalMode() {
+            const mode = this.$stateStore.magneticBuilder.mode.terminal;
+            return mode != null ? mode : this.$stateStore.MagneticBuilderModes.Basic;
+        },
+        connectionTypeValues() {
+            return Object.values(ConnectionType);
+        },
+        // Value for the Simple dropdown; falls back to the first type so it is never blank.
+        simpleTerminalType() {
+            const terminalType = this.masStore.mas.inputs.designRequirements.terminalType;
+            return (Array.isArray(terminalType) && terminalType.length > 0 && terminalType[0] != null)
+                ? terminalType[0] : this.connectionTypeValues[0];
         },
 
     },
@@ -160,6 +174,23 @@ export default {
                 this.masStore.mas.inputs.designRequirements.turnsRatios = newElementsTurnsRatios;
                 this.masStore.mas.magnetic.coil.functionalDescription = newElementsCoil;
                 this.masStore.updatedTurnsRatios();
+
+                // Keep terminalType sized to the winding count (Simple fans the value out; Advanced keeps per-lead types).
+                const designRequirements = this.masStore.mas.inputs.designRequirements;
+                if (designRequirements.terminalType != null) {
+                    if (this.terminalMode == this.$stateStore.MagneticBuilderModes.Basic) {
+                        this.applyTerminalTypeToAll(this.simpleTerminalType);
+                    }
+                    else {
+                        const target = designRequirements.turnsRatios.length + 1;
+                        while (designRequirements.terminalType.length < target) {
+                            designRequirements.terminalType.push(this.simpleTerminalType);
+                        }
+                        if (designRequirements.terminalType.length > target) {
+                            designRequirements.terminalType.length = target;
+                        }
+                    }
+                }
             }
         },
         hasError() {
@@ -167,6 +198,71 @@ export default {
         },
         updatedIsolationSides(value, index) {
             this.masStore.mas.magnetic.coil.functionalDescription[index].isolationSide = value;
+        },
+        // Simple mode: fan one type onto every winding (terminalType) and every existing lead (connection.type).
+        applyTerminalTypeToAll(value) {
+            const designRequirements = this.masStore.mas.inputs.designRequirements;
+            const numberWindings = designRequirements.turnsRatios.length + 1;
+            designRequirements.terminalType = new Array(numberWindings).fill(value);
+            const coil = this.masStore.mas.magnetic != null ? this.masStore.mas.magnetic.coil : null;
+            const windings = (coil != null && Array.isArray(coil.functionalDescription))
+                ? coil.functionalDescription : [];
+            windings.forEach((winding) => {
+                if (Array.isArray(winding.connections)) {
+                    winding.connections.forEach((connection) => {
+                        if (connection != null) {
+                            connection.type = value;
+                        }
+                    });
+                }
+            });
+        },
+        allConnectionTypes() {
+            const coil = this.masStore.mas.magnetic != null ? this.masStore.mas.magnetic.coil : null;
+            const windings = (coil != null && Array.isArray(coil.functionalDescription))
+                ? coil.functionalDescription : [];
+            const types = [];
+            windings.forEach((winding) => {
+                (Array.isArray(winding.connections) ? winding.connections : []).forEach((connection) => {
+                    if (connection != null && connection.type != null && connection.type !== '') {
+                        types.push(connection.type);
+                    }
+                });
+            });
+            return types;
+        },
+        mostCommonTerminalType() {
+            const types = this.allConnectionTypes();
+            if (types.length === 0) {
+                return this.simpleTerminalType;
+            }
+            const counts = {};
+            let best = types[0];
+            types.forEach((type) => {
+                counts[type] = (counts[type] || 0) + 1;
+                if (counts[type] > (counts[best] || 0)) {
+                    best = type;
+                }
+            });
+            return best;
+        },
+        setTerminalMode(mode) {
+            const modes = this.$stateStore.MagneticBuilderModes;
+            if (mode == modes.Basic && this.terminalMode != modes.Basic) {
+                // Advanced -> Simple flattens per-lead types onto a single value.
+                const types = this.allConnectionTypes();
+                const nonUniform = types.length > 0 && !types.every((type) => type === types[0]);
+                if (nonUniform && !window.confirm(
+                    'Switching to Simple applies one terminal type to every winding and lead. '
+                    + 'Differing per-lead values will be overwritten. Continue?')) {
+                    return;
+                }
+                this.$stateStore.magneticBuilder.mode.terminal = modes.Basic;
+                this.applyTerminalTypeToAll(this.mostCommonTerminalType());
+            }
+            else {
+                this.$stateStore.magneticBuilder.mode.terminal = mode;
+            }
         },
         updatedWiringTechnologies(value, index) {
             if (this.masStore.mas.magnetic.coil.turnsDescription != null) {
@@ -438,22 +534,61 @@ export default {
                     :textColor="$styleStore.designRequirements.inputTextColor"
                 />
 
-                <ArrayElementFromList class="border-bottom py-2 ps-0"
-                    :style = "$styleStore.designRequirements.inputBorderColor"
+                <!-- Terminal Type. Simple = one type for all windings (locks Wire Config); Advanced = edit per lead there. connection.type is source of truth, terminalType derived. -->
+                <div class="border-bottom py-2 ps-0 container-flex text-start"
+                    :style="$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.terminalType != null"
-                    :name="'terminalType'"
-                    :dataTestLabel="dataTestLabel + '-TerminalType'"
-                    :defaultValue="new Array(Object.keys(ConnectionType).length).fill(Object.keys(ConnectionType)[0])"
-                    :options="Object.values(ConnectionType)" 
-                    :titleSameRow="true"
-                    :fixedNumberElements="masStore.mas.inputs.designRequirements.turnsRatios.length + 1"
-                    v-model="masStore.mas.inputs.designRequirements"
-                    :valueFontSize="$styleStore.designRequirements.inputFontSize"
-                    :titleFontSize="$styleStore.designRequirements.inputTitleFontSize"
-                    :labelBgColor="$styleStore.designRequirements.inputLabelBgColor"
-                    :valueBgColor="$styleStore.designRequirements.inputValueBgColor"
-                    :textColor="$styleStore.designRequirements.inputTextColor"
-                />
+                    :data-cy="dataTestLabel + '-TerminalType-container'">
+                    <div class="row align-items-center">
+                        <label
+                            class="rounded-2 fs-5 ms-3 col-12 col-sm-5"
+                            :style="combinedStyle([$styleStore.designRequirements.inputTitleFontSize, $styleStore.designRequirements.inputLabelBgColor, $styleStore.designRequirements.inputTextColor])"
+                            :class="combinedClass([$styleStore.designRequirements.inputTitleFontSize, $styleStore.designRequirements.inputLabelBgColor, $styleStore.designRequirements.inputTextColor])"
+                            :data-cy="dataTestLabel + '-TerminalType-title'">
+                            Terminal Type
+                        </label>
+                        <div class="col-12 col-sm-7 d-flex justify-content-end pe-3">
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Terminal type mode">
+                                <button type="button" class="btn"
+                                    :class="terminalMode == $stateStore.MagneticBuilderModes.Basic ? 'btn-primary' : 'btn-outline-secondary'"
+                                    :data-cy="dataTestLabel + '-TerminalType-mode-simple'"
+                                    @click="setTerminalMode($stateStore.MagneticBuilderModes.Basic)">Simple</button>
+                                <button type="button" class="btn"
+                                    :class="terminalMode == $stateStore.MagneticBuilderModes.Advanced ? 'btn-primary' : 'btn-outline-secondary'"
+                                    :data-cy="dataTestLabel + '-TerminalType-mode-advanced'"
+                                    @click="setTerminalMode($stateStore.MagneticBuilderModes.Advanced)">Advanced</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row ms-5 mt-1" v-if="terminalMode == $stateStore.MagneticBuilderModes.Basic">
+                        <div class="col-12 d-flex align-items-center gap-2">
+                            <span
+                                :style="combinedStyle([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])"
+                                :class="combinedClass([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])">All windings</span>
+                            <select
+                                class="form-select py-1 px-2"
+                                style="width: auto; max-height: 3em;"
+                                :style="combinedStyle([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputValueBgColor, $styleStore.designRequirements.inputTextColor])"
+                                :class="combinedClass([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputValueBgColor, $styleStore.designRequirements.inputTextColor])"
+                                :value="simpleTerminalType"
+                                :data-cy="dataTestLabel + '-TerminalType-select'"
+                                v-tooltip="'Terminal type applied to every winding and lead. Per-lead editing in Wire Configuration is locked while in Simple mode.'"
+                                @change="applyTerminalTypeToAll($event.target.value)">
+                                <option v-for="opt in connectionTypeValues" :key="opt" :value="opt">{{ opt }}</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row ms-5 mt-1" v-else>
+                        <span class="col-12"
+                            :style="combinedStyle([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])"
+                            :class="combinedClass([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])"
+                            :data-cy="dataTestLabel + '-TerminalType-advanced-hint'">
+                            <i class="fa-solid fa-circle-info me-1"></i>Terminal types are edited per connection in Wire Configuration.
+                        </span>
+                    </div>
+                </div>
 
                 <ArrayElementFromList class="border-bottom py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
