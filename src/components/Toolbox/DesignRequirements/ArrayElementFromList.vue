@@ -120,7 +120,7 @@ export default {
 </script>
 
 <template>
-    <div :data-cy="dataTestLabel + '-container'" class="container-flex border-bottom">
+    <div :data-cy="dataTestLabel + '-container'" class="container-flex border-bottom text-start">
         <div class="row">
             <label
                 :style="combinedStyle([titleFontSize, labelBgColor, textColor])"
