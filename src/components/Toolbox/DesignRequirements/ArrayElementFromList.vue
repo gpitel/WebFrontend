@@ -2,7 +2,6 @@
 import { useMasStore } from '../../../stores/mas'
 import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import { isolationSideOrdered } from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
 <script>
@@ -144,7 +143,7 @@ export default {
                 :name="requirementIndex - 1"
                 v-model="masStore.mas.inputs.designRequirements[name]"
                 :options="options"
-                :replaceTitle="isolationSideOrdered[requirementIndex - 1]"
+                :replaceTitle="'Winding ' + requirementIndex"
                 :labelFontSize='valueFontSize'
                 :valueFontSize='valueFontSize'
                 :labelBgColor='labelBgColor'
