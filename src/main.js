@@ -135,7 +135,8 @@ router.beforeEach((to, from, next) => {
     }
 
     if (loadData) {
-        if (app.config.globalProperties.$mkf == null && to.name != "EngineLoader") {
+        if (app.config.globalProperties.$mkf == null && to.name != "EngineLoader" && to.name != "SchematicPlayground") {
+            // SchematicPlayground is pure JS (no WASM engine), so it skips the loader.
             app.config.globalProperties.$userStore.loadingPath = to.path
             router.push(`${import.meta.env.BASE_URL}engine_loader`)
         }

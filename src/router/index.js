@@ -12,6 +12,11 @@ const routes = [
         component: () => import('../views/EngineLoader.vue')
     },
     {
+        path: '/schematic_playground',
+        name: 'SchematicPlayground',
+        component: () => import('../views/SchematicPlayground.vue')
+    },
+    {
         path: '/cookie_policy',
         name: 'CookiePolicy',
         component: () => import('../views/CookiePolicy.vue')
