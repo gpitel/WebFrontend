@@ -109,24 +109,36 @@ export default {
 </template>
 
 <style scoped>
-.playground { display: flex; gap: 1rem; padding: 1rem; height: 100vh; box-sizing: border-box; color: #eee; }
-.left { width: 480px; min-width: 380px; display: flex; flex-direction: column; overflow-y: auto; }
-.right { flex: 1; min-width: 300px; }
-h2 { margin: 0 0 .25rem; }
+/* OpenMagnetics palette (mirrors the --bs-* tokens in assets/css/custom.css).
+   Hard-coded because those vars are only set after the engine-loader init, which
+   this route skips: teal #539796, dark #1a1a1a, panel #2a2a2a, text #d4d4d4. */
+.playground { display: flex; gap: 1rem; padding: 1rem; height: 100vh; box-sizing: border-box;
+    color: #d4d4d4; background: #1a1a1a; }
+.left { width: 480px; min-width: 380px; display: flex; flex-direction: column; overflow-y: auto;
+    border: 1px solid #539796; border-radius: 6px; padding: 1rem; }
+.right { flex: 1; min-width: 300px; border: 1px solid #539796; border-radius: 6px; padding: .5rem; }
+h2 { margin: 0 0 .25rem; color: #539796; font-size: 1.5rem; }
 .hint { font-size: .85rem; opacity: .7; margin: .25rem 0; }
+.hint code { color: #539796; }
 .lbl { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; opacity: .6; margin-top: .75rem; }
 .mocks { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
-.chip { padding: .25rem .6rem; border: 1px solid #555; border-radius: 999px; background: transparent; color: #ddd; cursor: pointer; font-size: .8rem; }
-.chip.active { background: #2d7ff9; border-color: #2d7ff9; color: #fff; }
-.caption { font-size: .85rem; opacity: .8; margin: .4rem 0 0; }
-.json { height: 200px; font-family: monospace; font-size: .8rem; margin-top: .35rem; resize: vertical; }
-.endpoint { font-family: monospace; font-size: .8rem; margin-top: .35rem; padding: .3rem; }
+.chip { padding: .25rem .6rem; border: 1px solid #539796; border-radius: 999px;
+    background: transparent; color: #d4d4d4; cursor: pointer; font-size: .8rem; }
+.chip.active { background: #539796; color: #1a1a1a; }
+.caption { font-size: .85rem; color: #539796; opacity: .9; margin: .4rem 0 0; }
+.json, .endpoint { font-family: monospace; font-size: .8rem; margin-top: .35rem; padding: .35rem;
+    background: #2a2a2a; color: #d4d4d4; border: 1px solid rgba(83, 151, 150, .45); border-radius: 4px; }
+.json { height: 200px; resize: vertical; }
 .actions { display: flex; gap: .5rem; margin-top: .75rem; }
-.btn { padding: .45rem .9rem; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: #eee; cursor: pointer; }
-.btn.primary { background: #2d7ff9; border-color: #2d7ff9; color: #fff; }
+.btn { padding: .45rem .9rem; border: 1px solid #539796; border-radius: 6px;
+    background: transparent; color: #539796; cursor: pointer; }
+.btn.primary { background: #539796; color: #1a1a1a; }
 .btn:disabled { opacity: .5; cursor: default; }
-.error { color: #ff7b7b; font-size: .85rem; margin-top: .5rem; }
-.tikz { flex: 1; min-height: 160px; background: #1b1b1b; padding: .5rem; font-size: .72rem; overflow: auto; white-space: pre; border-radius: 6px; }
-.pdf { width: 100%; height: 100%; border: none; background: #fff; border-radius: 6px; }
-.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; opacity: .5; border: 1px dashed #555; border-radius: 6px; }
+.error { color: #ff8800; font-size: .85rem; margin-top: .5rem; }
+.tikz { flex: 1; min-height: 160px; background: #000; color: #d4d4d4; padding: .5rem;
+    font-size: .72rem; overflow: auto; white-space: pre; border-radius: 6px;
+    border: 1px solid rgba(83, 151, 150, .35); }
+.pdf { width: 100%; height: 100%; border: none; background: #fff; border-radius: 4px; }
+.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; opacity: .6; border: 1px dashed rgba(83, 151, 150, .5); border-radius: 6px; }
 </style>
