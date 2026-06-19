@@ -8,14 +8,17 @@ import { MOCK_COILS } from '/WebSharedComponents/assets/js/mockCoils.js';
 export default {
     name: 'SchematicPlayground',
     data() {
-        const base = import.meta.env.VITE_API_ENDPOINT || '';
+        const base = import.meta.env.VITE_API_ENDPOINT;
         return {
             mocks: MOCK_COILS,
             selected: 0,
             coilText: '',
             tikz: '',
             pdf: null,
-            endpoint: `${base}/process_latex`,
+            // Production serves /process_latex off VITE_API_ENDPOINT. Local dev has no
+            // such backend, so fall back to the standalone render server
+            // (magneticdesigner scripts/latex_render_server.py on :8765).
+            endpoint: base ? `${base}/process_latex` : 'http://localhost:8765/process_latex',
             error: '',
             rendering: false,
         };
