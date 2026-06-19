@@ -3,8 +3,8 @@ import { coilToTikz } from '/WebSharedComponents/assets/js/coilToTikz.js';
 import { MOCK_COILS } from '/WebSharedComponents/assets/js/mockCoils.js';
 
 // Proof-of-concept playground: pick (or paste) a coil, generate its electrical
-// schematic as TikZ via coilToTikz(), and render it to a PDF through the existing
-// /process_latex backend endpoint.
+// schematic as TikZ via coilToTikz(), and render it to an inline SVG through the OM
+// backend's /process_latex_svg endpoint (shown white-on-dark via a CSS invert).
 export default {
     name: 'SchematicPlayground',
     data() {
@@ -14,11 +14,11 @@ export default {
             selected: 0,
             coilText: '',
             tikz: '',
-            pdf: null,
-            // Production serves /process_latex off VITE_API_ENDPOINT. For local dev,
+            svg: '',
+            // Production serves the renderer off VITE_API_ENDPOINT. For local dev,
             // default to the OM WebBackend on :8001 (the canonical :8000 is taken by
             // the prebuilt reference container here). Field is editable.
-            endpoint: base ? `${base}/process_latex` : 'http://localhost:8001/process_latex',
+            endpoint: base ? `${base}/process_latex_svg` : 'http://localhost:8001/process_latex_svg',
             error: '',
             rendering: false,
         };
@@ -34,7 +34,7 @@ export default {
         },
         generate() {
             this.error = '';
-            this.pdf = null;
+            this.svg = '';
             try {
                 const coil = JSON.parse(this.coilText);
                 this.tikz = coilToTikz(coil);
@@ -43,18 +43,18 @@ export default {
                 this.error = `Could not generate TikZ: ${e.message}`;
             }
         },
-        renderPdf() {
+        render() {
             if (!this.tikz) return;
             this.rendering = true;
             this.error = '';
             this.$axios.post(this.endpoint, this.tikz)
                 .then((response) => {
-                    this.pdf = `data:application/pdf;base64,${response.data}`;
+                    this.svg = response.data;
                 })
                 .catch((err) => {
                     this.error = `Render failed (${this.endpoint}): ${err.message}. `
                         + 'The TikZ above is still valid -- point the endpoint at a '
-                        + 'backend that exposes /process_latex.';
+                        + 'backend that exposes /process_latex_svg.';
                 })
                 .finally(() => { this.rendering = false; });
         },
@@ -68,7 +68,7 @@ export default {
             <h2>Schematic Playground</h2>
             <p class="hint">
                 Pick a mock coil (or edit the JSON), generate its TikZ schematic, then
-                render it to PDF via <code>/process_latex</code>.
+                render it to an inline SVG via <code>/process_latex_svg</code>.
             </p>
 
             <label class="lbl">Mock coil</label>
@@ -87,8 +87,8 @@ export default {
 
             <div class="actions">
                 <button class="btn" @click="generate">Generate TikZ</button>
-                <button class="btn primary" :disabled="rendering || !tikz" @click="renderPdf">
-                    {{ rendering ? 'Rendering...' : 'Render PDF' }}
+                <button class="btn primary" :disabled="rendering || !tikz" @click="render">
+                    {{ rendering ? 'Rendering...' : 'Render' }}
                 </button>
             </div>
 
@@ -99,10 +99,10 @@ export default {
         </div>
 
         <div class="right">
-            <iframe v-if="pdf" :src="pdf" class="pdf" title="schematic"></iframe>
+            <div v-if="svg" class="svg-wrap" v-html="svg"></div>
             <div v-else class="placeholder">
                 <p>Rendered schematic appears here.</p>
-                <p class="hint">Click <strong>Render PDF</strong> to compile the TikZ.</p>
+                <p class="hint">Click <strong>Render</strong> to compile the TikZ.</p>
             </div>
         </div>
     </div>
@@ -138,7 +138,8 @@ h2 { margin: 0 0 .25rem; color: #539796; font-size: 1.5rem; }
 .tikz { flex: 1; min-height: 160px; background: #000; color: #d4d4d4; padding: .5rem;
     font-size: .72rem; overflow: auto; white-space: pre; border-radius: 6px;
     border: 1px solid rgba(83, 151, 150, .35); }
-.pdf { width: 100%; height: 100%; border: none; background: #fff; border-radius: 4px; }
+.svg-wrap { height: 100%; padding: .5rem; box-sizing: border-box; filter: invert(1); }
+.svg-wrap :deep(svg) { width: 100%; height: 100%; }   /* viewBox keeps aspect (meet) */
 .placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 100%; opacity: .6; border: 1px dashed rgba(83, 151, 150, .5); border-radius: 6px; }
 </style>
