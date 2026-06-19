@@ -8,6 +8,7 @@ import CoreExporter from '../Exporters/CoreExporter.vue'
 import CoilExporter from '../Exporters/CoilExporter.vue'
 import MASExporter from '../Exporters/MASExporter.vue'
 import CircuitSimulatorsExporter from '../Exporters/CircuitSimulatorsExporter.vue'
+import { coilToTikz } from '/WebSharedComponents/assets/js/coilToTikz.js'
 </script>
 
 <script>
@@ -30,6 +31,7 @@ export default {
             includeFringing: true,
             PLOT_MODES,
             processedMas: null,
+            schematicSvg: '',
         }
     },
     computed: {
@@ -593,8 +595,22 @@ export default {
     },
     mounted() {
         this.computeTexts();
+        this.renderSchematic();
     },
     methods: {
+        renderSchematic() {
+            // Build the coil's electrical schematic (coilToTikz) and render it to an
+            // inline SVG via the backend's /process_latex_svg; omit silently if the
+            // coil has no connections or the renderer endpoint is unavailable.
+            const coil = this.mas?.magnetic?.coil;
+            if (!coil || !(coil.functionalDescription || []).length) return;
+            let tikz;
+            try { tikz = coilToTikz(coil); } catch (e) { return; }
+            const base = import.meta.env.VITE_API_ENDPOINT || 'http://localhost:8001';
+            this.$axios.post(`${base}/process_latex_svg`, tikz)
+                .then((response) => { this.schematicSvg = response.data; })
+                .catch(() => { /* no /process_latex_svg backend -- skip the schematic */ });
+        },
         plotModeChange(newMode) {
             this.plotMode = newMode;
         },
@@ -976,6 +992,12 @@ export default {
                 </div>
             </div>
 
+            <!-- Electrical Schematic -->
+            <div class="section" v-if="schematicSvg">
+                <h3 class="section-title"><i class="fa-solid fa-diagram-project"></i>Schematic</h3>
+                <div class="schematic" v-html="schematicSvg"></div>
+            </div>
+
             <!-- Winding Construction Steps -->
             <div class="section" v-if="isWoundMagnetic && windingConstructionSteps.length > 0">
                 <h3 class="section-title"><i class="fa-solid fa-list-check"></i>Winding Construction Steps</h3>
@@ -1020,6 +1042,8 @@ export default {
 </template>
 
 <style scoped>
+.schematic { display: flex; justify-content: center; padding: .5rem 0; filter: invert(1); }
+.schematic :deep(svg) { max-width: 100%; max-height: 460px; width: auto; height: auto; }
 .datasheet-wrapper {
     background: var(--bs-dark);
     min-height: 100vh;
