@@ -15,10 +15,10 @@ export default {
             coilText: '',
             tikz: '',
             pdf: null,
-            // Production serves /process_latex off VITE_API_ENDPOINT. Local dev has no
-            // such backend, so fall back to the standalone render server
-            // (magneticdesigner scripts/latex_render_server.py on :8765).
-            endpoint: base ? `${base}/process_latex` : 'http://localhost:8765/process_latex',
+            // Production serves /process_latex off VITE_API_ENDPOINT. For local dev,
+            // default to the OM backend (docker compose up backend -> :8000), which
+            // exposes the same /process_latex. Field is editable.
+            endpoint: base ? `${base}/process_latex` : 'http://localhost:8000/process_latex',
             error: '',
             rendering: false,
         };
