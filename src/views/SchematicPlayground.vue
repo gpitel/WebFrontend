@@ -16,9 +16,9 @@ export default {
             tikz: '',
             pdf: null,
             // Production serves /process_latex off VITE_API_ENDPOINT. For local dev,
-            // default to the OM backend (docker compose up backend -> :8000), which
-            // exposes the same /process_latex. Field is editable.
-            endpoint: base ? `${base}/process_latex` : 'http://localhost:8000/process_latex',
+            // default to the OM WebBackend on :8001 (the canonical :8000 is taken by
+            // the prebuilt reference container here). Field is editable.
+            endpoint: base ? `${base}/process_latex` : 'http://localhost:8001/process_latex',
             error: '',
             rendering: false,
         };
