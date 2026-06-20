@@ -217,9 +217,6 @@ export default {
     },
     mounted() {
         this.$settingsStore.loadingGif = "/images/loading.gif";
-        let fontawesome = document.createElement('script')
-        fontawesome.setAttribute('src', 'https://kit.fontawesome.com/d5a40d6941.js')
-        document.head.appendChild(fontawesome)
 
         const style = getComputedStyle(document.body);
         const theme = {

@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { Tooltip } from 'bootstrap';
 import 'bootstrap';
+import '@fortawesome/fontawesome-free/css/all.min.css';
 import router from "./router";
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
