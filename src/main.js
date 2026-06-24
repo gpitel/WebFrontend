@@ -117,7 +117,7 @@ router.beforeEach((to, from, next) => {
         setTimeout(() => {router.push(from.path);}, 500);
     }
 
-    const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`]
+    const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`, `${import.meta.env.BASE_URL}schematic_playground`]
 
     var loadData = !nonDataViews.includes(to.path);
 
@@ -136,8 +136,7 @@ router.beforeEach((to, from, next) => {
     }
 
     if (loadData) {
-        if (app.config.globalProperties.$mkf == null && to.name != "EngineLoader" && to.name != "SchematicPlayground") {
-            // SchematicPlayground is pure JS (no WASM engine), so it skips the loader.
+        if (app.config.globalProperties.$mkf == null && to.name != "EngineLoader") {
             app.config.globalProperties.$userStore.loadingPath = to.path
             router.push(`${import.meta.env.BASE_URL}engine_loader`)
         }
