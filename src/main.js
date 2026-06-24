@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { Tooltip } from 'bootstrap';
 import 'bootstrap';
+import '@fortawesome/fontawesome-free/css/all.min.css';
 import router from "./router";
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
@@ -116,7 +117,7 @@ router.beforeEach((to, from, next) => {
         setTimeout(() => {router.push(from.path);}, 500);
     }
 
-    const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`]
+    const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`, `${import.meta.env.BASE_URL}schematic_playground`]
 
     var loadData = !nonDataViews.includes(to.path);
 
