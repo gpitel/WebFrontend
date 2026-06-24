@@ -1,9 +1,9 @@
 <script setup>
 import WaveformInputCustomPoint from './WaveformInputCustomPoint.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import { WaveformLabel } from '/WebSharedComponents/assets/ts/MAS.ts'
-import { minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { toTitleCase, combinedStyle } from '/WebSharedComponents/assets/js/utils.js'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import { WaveformLabel } from 'WebSharedComponents/assets/ts/MAS.ts'
+import { minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { toTitleCase, combinedStyle } from 'WebSharedComponents/assets/js/utils.js'
 
 </script>
 
@@ -40,13 +40,18 @@ export default {
         }
     },
     computed: {
+        waveformLabelOptions() {
+            const result = {};
+            Object.values(WaveformLabel).forEach(v => { result[v] = toTitleCase(v); });
+            return result;
+        },
         induceableSignal() {
             if (this.signalDescriptor == 'current') {
                 return true;
             }
             else {
                 const label = this.modelValue.current?.processed?.label;
-                return label != "Rectangular" && label != "Bipolar Rectangular" && label != "Unipolar Rectangular";
+                return label != "rectangular" && label != "bipolarRectangular" && label != "unipolarRectangular";
             }
         }
     },
@@ -66,14 +71,15 @@ export default {
 </script>
 
 <template>
-    <div class="container-flex text-white mt-2 mb-3 pb-3 border-bottom">
-        <!-- <label class="fs-4 row" :class="titleColor(signalDescriptor)">Waveform for {{signalDescriptor}}</label> -->
+    <div class="container-flex text-white mt-2 mb-3 pb-3">
+        <!-- <label class="text-2xl row" :class="titleColor(signalDescriptor)">Waveform for {{signalDescriptor}}</label> -->
         <div></div>
-        <ElementFromList class="border-bottom pb-2 mb-1"
+        <ElementFromList class="pb-2 mb-1"
             v-if="modelValue[signalDescriptor] != null"
             :name="'label'"
             :dataTestLabel="dataTestLabel + '-Label'"
             :options="Object.values(WaveformLabel)"
+            :optionLabels="waveformLabelOptions"
             :titleSameRow="true"
             :replaceTitle="'Waveform'"
             v-model="modelValue[signalDescriptor].processed"
@@ -100,23 +106,63 @@ export default {
             </template>
             <button
                 v-if="Object.keys(modelValue[signalDescriptor].waveform.data).length > 3"
-                class="btn btn-outline-secondary col-12 mt-1 py-0"
+                class="wic-add-btn col-12 mt-1 py-0"
                 style="font-size: 0.75em;"
                 @click="showAllPoints = !showAllPoints">
-                <i :class="showAllPoints ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'"></i>
+                <i :class="showAllPoints ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
                 {{ showAllPoints ? 'Show less' : `Show ${Object.keys(modelValue[signalDescriptor].waveform.data).length - 3} more points` }}
             </button>
         </div>
         <button
             v-if="induceableSignal"
-            :style="combinedStyle([$styleStore.operatingPoints.inputFontSize, signalDescriptor == 'current'? $styleStore.operatingPoints.currentBgColor : signalDescriptor == 'voltage'? $styleStore.operatingPoints.voltageBgColor : $styleStore.operatingPoints.commonParameterBgColor])"
-            class="btn offset-2 col-8 mt-2 p-0"
-            @click="$emit('induce')"
-            style="max-height: 1.7em">
+            :style="[
+                combinedStyle([$styleStore.operatingPoints.inputFontSize, signalDescriptor == 'current'? $styleStore.operatingPoints.currentBgColor : signalDescriptor == 'voltage'? $styleStore.operatingPoints.voltageBgColor : $styleStore.operatingPoints.commonParameterBgColor]),
+                { color: signalDescriptor == 'current' ? 'var(--p-dark)' : 'var(--p-white)', fontWeight: 600, maxHeight: '1.7em' }
+            ]"
+            class="wic-induce-btn col-offset-2 col-8 mt-2"
+            @click="$emit('induce')">
             {{'Induce from ' + (signalDescriptor == 'current'? 'voltage' : 'current')}}
-            <i class="fa-solid fa-bolt"></i>
-            <i class="fa-solid fa-magnet"></i>
+            <i class="pi pi-bolt"></i>
+            <i class="pi pi-cog"></i>
         </button>
     </div>
 </template>
+
+<style scoped>
+/* The induce button's background colour comes from the inline :style
+   (current = orange, voltage = purple); here we just give it proper button
+   chrome — rounded, padded, no default grey border/box. */
+.wic-induce-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 0.3rem 0.75rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.25);
+    transition: filter 0.15s, transform 0.1s;
+}
+.wic-induce-btn:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+}
+
+/* "Show N more points" toggle: a subtle outline button instead of the
+   unstyled grey bar. */
+.wic-add-btn {
+    background: rgba(var(--p-white-rgb), 0.06);
+    border: 1px solid rgba(var(--p-white-rgb), 0.15);
+    color: rgba(var(--p-white-rgb), 0.85);
+    border-radius: 8px;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.wic-add-btn:hover {
+    background: rgba(var(--p-white-rgb), 0.12);
+    border-color: rgba(var(--p-white-rgb), 0.3);
+}
+</style>
 

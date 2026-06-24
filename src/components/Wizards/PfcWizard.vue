@@ -1,14 +1,18 @@
 <script setup>
+import { IsolationSide, Topologies } from 'WebSharedComponents/assets/ts/MAS.ts'
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
-import { combinedStyle, combinedClass, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromListRadio from '/WebSharedComponents/DataInput/ElementFromListRadio.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import { defaultPfcWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from '/WebSharedComponents/assets/js/defaults.js'
+import { combinedStyle, combinedClass, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import DimensionReadOnly from 'WebSharedComponents/DataInput/DimensionReadOnly.vue'
+import ElementFromListRadio from 'WebSharedComponents/DataInput/ElementFromListRadio.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import { defaultPfcWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from 'WebSharedComponents/assets/js/defaults.js'
 import ConverterWizardBase from './ConverterWizardBase.vue'
-import { waitForMkf } from '/WebSharedComponents/assets/js/mkfRuntime'
+import { waitForMkf } from 'WebSharedComponents/assets/js/mkfRuntime'
+import CompactVoltageInput from './CompactVoltageInput.vue'
+import { tooltipsConverterWizards, dropdownLabelsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
 
 <script>
@@ -21,25 +25,33 @@ export default {
         },
         labelWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-9'
+            default: 'col-12 md:col-9'
         },
         valueWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-3'
+            default: 'col-12 md:col-3'
         },
     },
     data() {
         const masStore = useMasStore();
         const taskQueueStore = useTaskQueueStore();
         const designLevelOptions = ['Help me with the design', 'I know the design I want'];
-        const modeOptions = ['Continuous Conduction Mode', 'Critical Conduction Mode', 'Discontinuous Conduction Mode'];
+        const modeOptions = ['continuousConductionMode', 'criticalConductionMode', 'discontinuousConductionMode'];
+        // Supported PFC power-stage variants (buck/buckBoost throw in MKF; Vienna
+        // has its own wizard, so they are intentionally not offered here).
+        const variantOptions = ['boost', 'bridgeless', 'semiBridgeless', 'interleavedBoost', 'totemPole', 'sepic', 'cuk'];
+        const phaseOptions = [2, 3];
         const errorMessage = "";
         const localData = deepCopy(defaultPfcWizardInputs);
         return {
+            pfcDiagnostics: null,
             masStore,
             taskQueueStore,
             designLevelOptions,
             modeOptions,
+            variantOptions,
+            phaseOptions,
+            dropdownLabelsConverterWizards,
             localData,
             errorMessage,
             simulatingWaveforms: false,
@@ -54,14 +66,25 @@ export default {
             waveformSource: 'analytical', // 'analytical' or 'simulation'
             forceWaveformUpdate: 0,
             numberOfPeriods: 2,
-            numberOfSteadyStatePeriods: 10,
+            numberOfSteadyStatePeriods: 50,
             converterName: 'Power Factor Correction (PFC)',
             detectedMode: null
         }
     },
     computed: {
         isCcmMode() {
-            return this.localData.mode === 'Continuous Conduction Mode';
+            return this.localData.mode === 'continuousConductionMode';
+        },
+        isInterleaved() {
+            return this.localData.topologyVariant === 'interleavedBoost';
+        },
+        isTotemPole() {
+            return this.localData.topologyVariant === 'totemPole';
+        },
+        // SEPIC / Ćuk are buck-boost class: the output may sit below the line
+        // peak, so the "Vout > Vpk" boost constraint does not apply to them.
+        isBuckBoostClass() {
+            return this.localData.topologyVariant === 'sepic' || this.localData.topologyVariant === 'cuk';
         }
     },
     watch: {
@@ -91,8 +114,26 @@ export default {
         if (this.localData.designLevel === 'I know the design I want' && this.localData.inductance > 0) {
             this.detectActualMode();
         }
+        this.$nextTick(() => {
+            if (this._autoRunDone) return;
+            this._autoRunDone = true;
+            try { this.updateErrorMessage?.(); } catch (e) { return; }
+            if (!this.errorMessage) this.simulateIdealWaveforms?.();
+        });
     },
     methods: {
+
+    // Topology-variant params shared by every MKF call. The MAS schema parses
+    // these directly (PowerFactorCorrection(json)), so no extra backend wiring
+    // is needed. numberOfPhases only matters for interleavedBoost;
+    // wideBandgapSwitch only for totemPole CCM — both are harmless otherwise.
+    variantParams() {
+      return {
+        topologyVariant: this.localData.topologyVariant,
+        numberOfPhases: Number(this.localData.numberOfPhases) || 2,
+        wideBandgapSwitch: this.localData.wideBandgapSwitch !== false,
+      };
+    },
 
     // ===== WIZARD CONTRACT =====
     buildParams(mode) {
@@ -102,8 +143,18 @@ export default {
         lineFrequency: this.localData.lineFrequency, currentRippleRatio: this.localData.currentRippleRatio,
         efficiency: this.localData.efficiency, mode: this.localData.mode,
         diodeVoltageDrop: this.localData.diodeVoltageDrop, ambientTemperature: this.localData.ambientTemperature,
+        ...this.variantParams(),
       };
       if (this.localData.designLevel == 'I know the design I want') aux.inductance = this.localData.inductance;
+      if (mode === 'spice') {
+        const outputCurrent = this.localData.outputPower / this.localData.outputVoltage;
+        aux.operatingPoints = [{
+          outputVoltage: this.localData.outputVoltage,
+          outputCurrent,
+          switchingFrequency: this.localData.switchingFrequency,
+          ambientTemperature: this.localData.ambientTemperature,
+        }];
+      }
       return aux;
     },
     getCalculateFn() {
@@ -124,10 +175,17 @@ export default {
     },
     getDefaultFrequency() { return this.localData.switchingFrequency; },
     postProcessResults(result, mode) {
+            this.pfcDiagnostics = result?.pfcDiagnostics ?? null;
       if (result.inductance) this.simulatedInductance = result.inductance;
+      // calculate_pfc_inputs returns { masInputs: {designRequirements,
+      // operatingPoints}, inductance, ... }. Capture DR so the Adviser path
+      // (process()) doesn't fall through to its skeleton-DR fallback, which
+      // omits required keys like turnsRatios.
+      const dr = result?.masInputs?.designRequirements ?? result?.designRequirements;
+      if (dr) this.designRequirements = dr;
     },
-    getTopology() { return 'Boost Converter'; },  // PFC is typically implemented as a Boost topology
-    getIsolationSides() { return ['primary']; },
+    getTopology() { return Topologies.PowerFactorCorrection; },
+    getIsolationSides() { return [IsolationSide.Primary]; },
     getInsulationType() { return null; },
 
         updateErrorMessage() {
@@ -143,12 +201,16 @@ export default {
                 return;
             }
 
-            // Check that output voltage > peak input voltage
-            const vinMax = this.localData.inputVoltage.maximum || this.localData.inputVoltage.nominal;
-            const vinPeakMax = vinMax * Math.sqrt(2);
-            if (this.localData.outputVoltage <= vinPeakMax) {
-                this.errorMessage = `Output voltage (${this.localData.outputVoltage}V) must be greater than peak input (${vinPeakMax.toFixed(1)}V)`;
-                return;
+            // Boost-family PFC can only step up, so Vout must exceed the peak
+            // input. SEPIC / Ćuk are buck-boost class and may regulate a bus
+            // below the line peak, so this constraint does not apply to them.
+            if (!this.isBuckBoostClass) {
+                const vinMax = this.localData.inputVoltage.maximum || this.localData.inputVoltage.nominal;
+                const vinPeakMax = vinMax * Math.sqrt(2);
+                if (this.localData.outputVoltage <= vinPeakMax) {
+                    this.errorMessage = `Output voltage (${this.localData.outputVoltage}V) must be greater than peak input (${vinPeakMax.toFixed(1)}V)`;
+                    return;
+                }
             }
         },
 
@@ -162,14 +224,11 @@ export default {
                 const Module = await waitForMkf();
                 await Module.ready;
 
-                const params = {
-                    inputVoltage: this.localData.inputVoltage,
-                    outputVoltage: this.localData.outputVoltage,
-                    outputPower: this.localData.outputPower,
-                    switchingFrequency: this.localData.switchingFrequency,
-                    efficiency: this.localData.efficiency,
-                    diodeVoltageDrop: this.localData.diodeVoltageDrop
-                };
+                // Reuse buildParams() — the single param source — so the variant
+                // fields can never drift from the analytical/simulation/spice
+                // paths. determine_pfc_mode takes inductance as an explicit arg
+                // and ignores the (harmless) extra keys.
+                const params = this.buildParams('analytical');
 
                 const result = JSON.parse(await Module.determine_pfc_mode(JSON.stringify(params), this.localData.inductance));
 
@@ -185,8 +244,11 @@ export default {
       await this.$refs.base.executeWaveformAction(this, 'analytical');
     },
         
-        async getSimulatedWaveforms() {
+        async simulateIdealWaveforms() {
       await this.$refs.base.executeWaveformAction(this, 'simulation');
+    },
+    async getSpiceCode() {
+      await this.$refs.base.generateSpiceCode(this);
     },
         
             
@@ -225,76 +287,25 @@ export default {
         
         async process() {
             this.updateErrorMessage();
-            if (this.errorMessage) return;
-            
+            if (this.errorMessage) return null;
+
             this.masStore.resetMas("power");
             this.$stateStore.closeCoilAdvancedInfo();
-            
+
+            // Delegate to the shared base contract, exactly like every other
+            // converter wizard (SepicWizard, BuckBoostWizard, …). The base reads
+            // the single source of truth — buildParams() — for the analytical
+            // fallback and the stored simulatedOperatingPoints for the common
+            // path, so topologyVariant flows through one place only.
             try {
-                // Check if we have stored operating points with waveforms (from Analytical or Simulated)
-                const hasStoredData = this.simulatedOperatingPoints && this.simulatedOperatingPoints.length > 0;
-                
-                let masInputs;
-                
-                if (hasStoredData) {
-                    // Use stored data - extract single period from waveforms
-                    const freq = this.getDefaultFrequency();
-                    const ops = this.$refs.base.extractSinglePeriodFromOperatingPoints(this.simulatedOperatingPoints, freq);
-                    
-                    // Calculate harmonics and processed data if missing
-                    const opsWithHarmonics = await this.$refs.base.processSimulatedOperatingPoints(ops, this.taskQueueStore);
-                    
-                    // Get designRequirements from stored data or compute basic ones
-                    const dr = this.designRequirements || {
-                        topology: 'PFC',
-                        magnetizingInductance: this.simulatedInductance ? { nominal: this.simulatedInductance } : null
-                    };
-                    
-                    // Setup masStore
-                    await this.$refs.base.setupMasStore({
-                        designRequirements: dr,
-                        operatingPoints: opsWithHarmonics,
-                        topology: this.getTopology(),
-                        isolationSides: this.getIsolationSides(),
-                        insulationType: this.getInsulationType(),
-                        wizardInstance: this
-                    });
-                    
-                    this.errorMessage = "";
-                    return this.masStore.mas.inputs;
-                } else {
-                    // Fallback: run analytical calculation via MKF
-                    const Module = await waitForMkf();
-                    await Module.ready;
-                    
-                    const aux = {
-                        inputVoltage: this.localData.inputVoltage,
-                        outputVoltage: this.localData.outputVoltage,
-                        outputPower: this.localData.outputPower,
-                        switchingFrequency: this.localData.switchingFrequency,
-                        lineFrequency: this.localData.lineFrequency,
-                        currentRippleRatio: this.localData.currentRippleRatio,
-                        efficiency: this.localData.efficiency,
-                        mode: this.localData.mode,
-                        diodeVoltageDrop: this.localData.diodeVoltageDrop,
-                        ambientTemperature: this.localData.ambientTemperature
-                    };
-                    
-                    if (this.localData.designLevel == 'I know the design I want') {
-                        aux['inductance'] = this.localData.inductance;
-                    }
-                    
-                    const result = JSON.parse(await Module.calculate_pfc_inputs(JSON.stringify(aux)));
-                    
-                    if (result.error) {
-                        this.errorMessage = result.error;
-                        return null;
-                    }
-                    
-                    this.masStore.mas.inputs = result.masInputs;
-                    this.errorMessage = "";
-                    return result.masInputs;
+                const result = await this.$refs.base.processWizardData(this, this.taskQueueStore);
+                if (!result.success) {
+                    this.errorMessage = result.error;
+                    return null;
                 }
+                this.designRequirements = result.designRequirements;
+                this.errorMessage = "";
+                return this.masStore.mas.inputs;
             } catch (error) {
                 console.error('Error processing design:', error);
                 this.errorMessage = error.message || String(error);
@@ -303,27 +314,15 @@ export default {
         },
         
         async processAndReview() {
-            console.log('[PFC] processAndReview started');
             const masInputs = await this.process();
 
             if (this.errorMessage || !masInputs) {
-                console.log('[PFC] processAndReview aborted - error or no masInputs');
                 return;
             }
 
-            console.log('[PFC] masInputs received:', JSON.stringify(masInputs, null, 2));
-
-            console.log('[PFC] Calling resetMagneticTool...');
             await this.$refs.base.navigateToReview(this.$stateStore, this.masStore, "Power");
-            console.log('[PFC] coil.functionalDescription:', this.masStore.mas.magnetic.coil.functionalDescription);
-
-            console.log('[PFC] Calling $nextTick...');
             await this.$nextTick();
-            console.log('[PFC] $nextTick done');
-
-            console.log('[PFC] Navigating to magnetic_tool...');
             await this.$router.push(`${import.meta.env.BASE_URL}magnetic_tool`);
-            console.log('[PFC] Navigation done');
         },
         
         async processAndAdvise() {
@@ -345,8 +344,9 @@ export default {
   <ConverterWizardBase
     ref="base"
     title="PFC Wizard"
-    titleIcon="fa-leaf"
+    titleIcon="pi pi-sitemap"
     subtitle="Power Factor Correction Rectifier"
+
     :col1Width="3" :col2Width="4" :col3Width="5"
     :magneticWaveforms="magneticWaveforms"
     :converterWaveforms="converterWaveforms"
@@ -363,12 +363,13 @@ export default {
     @update:numberOfPeriods="numberOfPeriods = $event"
     @update:numberOfSteadyStatePeriods="numberOfSteadyStatePeriods = $event"
     @get-analytical-waveforms="getAnalyticalWaveforms"
-    @get-simulated-waveforms="getSimulatedWaveforms"
+    @get-simulated-waveforms="simulateIdealWaveforms"
+    @get-spice-code="getSpiceCode"
     @dismiss-error="errorMessage = ''; waveformError = ''"
   >
     <template #design-mode>
       <ElementFromListRadio
-        :name="'designLevel'" :dataTestLabel="dataTestLabel + '-DesignLevel'"
+        :name="'designLevel'" :tooltip="tooltipsConverterWizards['designLevel']" :dataTestLabel="dataTestLabel + '-DesignLevel'"
         :replaceTitle="''" :options="designLevelOptions" :titleSameRow="false"
         v-model="localData"
         :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-12'"
@@ -378,15 +379,42 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
+      <ElementFromList class="mt-2"
+        :name="'topologyVariant'" :tooltip="tooltipsConverterWizards['topologyVariant']" :replaceTitle="'Topology'"
+        :options="variantOptions" :optionLabels="dropdownLabelsConverterWizards.pfcVariant" :titleSameRow="true"
+        :dataTestLabel="dataTestLabel + '-TopologyVariant'"
+        v-model="localData"
+        :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
+        :valueFontSize="$styleStore.wizard.inputFontSize"
+        :labelFontSize="$styleStore.wizard.inputLabelFontSize"
+        :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor"
+        :textColor="$styleStore.wizard.inputTextColor"
+        @update="updateErrorMessage"
+      />
+      <ElementFromList v-if="isInterleaved"
+        :name="'numberOfPhases'" :tooltip="tooltipsConverterWizards['numberOfPhases']" :replaceTitle="'Phases'"
+        :options="phaseOptions" :titleSameRow="true"
+        :dataTestLabel="dataTestLabel + '-NumberOfPhases'"
+        v-model="localData"
+        :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
+        :valueFontSize="$styleStore.wizard.inputFontSize"
+        :labelFontSize="$styleStore.wizard.inputLabelFontSize"
+        :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor"
+        :textColor="$styleStore.wizard.inputTextColor"
+        @update="updateErrorMessage"
+      />
+      <div v-if="isTotemPole" class="mt-1 px-1" :data-cy="dataTestLabel + '-TotemPoleHint'">
+        <small class="text-color-secondary"><i class="pi pi-info-circle mr-1"></i>Totem-pole CCM uses wide-bandgap (GaN/SiC) switches.</small>
+      </div>
     </template>
 
     <template #design-or-switch-parameters-title>
-      <div class="compact-header"><i class="fa-solid fa-cogs me-1"></i>{{localData.designLevel == 'I know the design I want' ? "Design Params" : "Operating Mode"}}</div>
+      <div class="compact-header"><i class="pi pi-cog-wide-connected mr-1"></i>{{localData.designLevel == 'I know the design I want' ? "Design Params" : "Operating Mode"}}</div>
     </template>
 
     <template #design-or-switch-parameters>
       <div v-if="localData.designLevel == 'I know the design I want'">
-        <Dimension :name="'inductance'" :replaceTitle="'Inductance'" unit="H"
+        <Dimension :name="'inductance'" :tooltip="tooltipsConverterWizards['inductance']" :replaceTitle="'Inductance'" unit="H"
           :dataTestLabel="dataTestLabel + '-Inductance'"
           :min="minimumMaximumScalePerParameter['inductance']['min']"
           :max="minimumMaximumScalePerParameter['inductance']['max']"
@@ -399,14 +427,15 @@ export default {
           @update="updateErrorMessage"
         />
         <div v-if="detectedMode" class="mt-2 p-2 rounded" :class="$styleStore.wizard.inputValueBgColor">
-          <small class="text-muted">Detected Mode:</small><br>
+          <small class="text-color-secondary">Detected Mode:</small><br>
           <strong :style="{ color: $styleStore.wizard.inputTextColor }">{{ detectedMode }}</strong>
         </div>
       </div>
       <div v-else>
         <ElementFromListRadio
-          :name="'mode'" :dataTestLabel="dataTestLabel + '-Mode'"
+          :name="'mode'" :tooltip="tooltipsConverterWizards['mode']" :dataTestLabel="dataTestLabel + '-Mode'"
           :replaceTitle="''" :options="modeOptions" :titleSameRow="false"
+          :optionLabels="dropdownLabelsConverterWizards.pfcMode"
           v-model="localData"
           :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-12'"
           :valueFontSize="$styleStore.wizard.inputFontSize"
@@ -415,7 +444,7 @@ export default {
           :textColor="$styleStore.wizard.inputTextColor"
           @update="updateErrorMessage"
         />
-        <Dimension v-if="isCcmMode" :name="'currentRippleRatio'" :replaceTitle="'Ripple'" unit="%" :visualScale="100"
+        <Dimension v-if="isCcmMode" :name="'currentRippleRatio'" :tooltip="tooltipsConverterWizards['currentRippleRatio']" :replaceTitle="'Ripple'" unit="%" :visualScale="100"
           :dataTestLabel="dataTestLabel + '-CurrentRippleRatio'"
           :min="0.01" :max="1"
           v-model="localData"
@@ -430,7 +459,7 @@ export default {
     </template>
 
     <template #conditions>
-      <Dimension :name="'switchingFrequency'" :replaceTitle="'Sw. Freq'" unit="Hz"
+      <Dimension :name="'switchingFrequency'" :tooltip="tooltipsConverterWizards['switchingFrequency']" :replaceTitle="'Sw. Freq'" unit="Hz"
         :dataTestLabel="dataTestLabel + '-SwitchingFrequency'"
         :min="minimumMaximumScalePerParameter['frequency']['min']"
         :max="minimumMaximumScalePerParameter['frequency']['max']"
@@ -442,7 +471,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'lineFrequency'" :replaceTitle="'Line Freq'" unit="Hz"
+      <Dimension :name="'lineFrequency'" :tooltip="tooltipsConverterWizards['lineFrequency']" :replaceTitle="'Line Freq'" unit="Hz"
         :dataTestLabel="dataTestLabel + '-LineFrequency'"
         :min="minimumMaximumScalePerParameter['frequency']['min']"
         :max="minimumMaximumScalePerParameter['frequency']['max']"
@@ -454,7 +483,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'ambientTemperature'" :replaceTitle="'Temp'" unit=" C"
+      <Dimension :name="'ambientTemperature'" :tooltip="tooltipsConverterWizards['ambientTemperature']" :replaceTitle="'Temp'" unit=" C"
         :dataTestLabel="dataTestLabel + '-AmbientTemperature'"
         :min="minimumMaximumScalePerParameter['temperature']['min']"
         :max="minimumMaximumScalePerParameter['temperature']['max']"
@@ -467,7 +496,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'diodeVoltageDrop'" :replaceTitle="'Diode Vd'" unit="V"
+      <Dimension :name="'diodeVoltageDrop'" :tooltip="tooltipsConverterWizards['diodeVoltageDrop']" :replaceTitle="'Diode Vd'" unit="V"
         :dataTestLabel="dataTestLabel + '-DiodeVoltageDrop'" :min="0" :max="10"
         v-model="localData"
         :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
@@ -477,7 +506,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'efficiency'" :replaceTitle="'Eff'" unit="%" :visualScale="100"
+      <Dimension :name="'efficiency'" :tooltip="tooltipsConverterWizards['efficiency']" :replaceTitle="'Efficiency'" unit="%" :visualScale="100"
         :dataTestLabel="dataTestLabel + '-Efficiency'" :min="0.5" :max="1"
         v-model="localData"
         :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
@@ -491,35 +520,27 @@ export default {
 
     <template #col1-footer>
       <div class="d-flex align-items-center justify-content-between mt-2">
-        <span v-if="errorMessage" class="error-text"><i class="fa-solid fa-exclamation-triangle me-1"></i>{{ errorMessage }}</span>
+        <span v-if="errorMessage" class="error-text"><i class="pi pi-exclamation-triangle mr-1"></i>{{ errorMessage }}</span>
         <span v-else></span>
         <div class="action-btns">
-          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="fa-solid fa-magnifying-glass me-1"></i>Review Specs</button>
-          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Design Magnetic</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="pi pi-search mr-1"></i>Review Specs</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="pi pi-sparkles mr-1"></i>Design Magnetic</button>
         </div>
       </div>
     </template>
-
     <template #input-voltage>
-      <DimensionWithTolerance :name="'inputVoltage'" :replaceTitle="''" unit="V"
+      <CompactVoltageInput
+        :name="'inputVoltage'"
+        :tooltip="tooltipsConverterWizards['inputVoltage']"
         :dataTestLabel="dataTestLabel + '-InputVoltage'"
-        :min="minimumMaximumScalePerParameter['voltage']['min']"
-        :max="minimumMaximumScalePerParameter['voltage']['max']"
-        :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-4'"
-        v-model="localData.inputVoltage" :severalRows="true"
-        :addButtonStyle="$styleStore.wizard.addButton"
-        :removeButtonBgColor="$styleStore.wizard.removeButton['background-color']"
-        :titleFontSize="$styleStore.wizard.inputLabelFontSize"
-        :valueFontSize="$styleStore.wizard.inputFontSize"
-        :labelFontSize="$styleStore.wizard.inputLabelFontSize"
-        :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor"
-        :textColor="$styleStore.wizard.inputTextColor"
+        unit="V"
+        :modelValue="localData.inputVoltage"
         @update="updateErrorMessage"
       />
     </template>
 
     <template #outputs>
-      <Dimension :name="'outputVoltage'" :replaceTitle="'Voltage'" unit="V"
+      <Dimension :name="'outputVoltage'" :tooltip="tooltipsConverterWizards['outputVoltage']" :replaceTitle="'Voltage'" unit="V"
         :dataTestLabel="dataTestLabel + '-OutputVoltage'"
         :min="minimumMaximumScalePerParameter['voltage']['min']"
         :max="minimumMaximumScalePerParameter['voltage']['max']"
@@ -531,7 +552,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'outputPower'" :replaceTitle="'Power'" unit="W"
+      <Dimension :name="'outputPower'" :tooltip="tooltipsConverterWizards['outputPower']" :replaceTitle="'Power'" unit="W"
         :dataTestLabel="dataTestLabel + '-OutputPower'"
         :min="1" :max="minimumMaximumScalePerParameter['power']['max']"
         v-model="localData"
@@ -542,6 +563,15 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
+    </template>
+      <template v-if="pfcDiagnostics" #diagnostics>
+      <DimensionReadOnly name="pfcInd" :tooltip="tooltipsConverterWizards['pfcInd']" :replaceTitle="'Computed L'" :value="pfcDiagnostics.computedInductance" unit="H" :numberDecimals="9":labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcInd'" />
+      <DimensionReadOnly name="pfcMode" :tooltip="tooltipsConverterWizards['pfcMode']" :replaceTitle="'Actual mode'" :value="pfcDiagnostics.actualMode" :unit="null" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcMode'" />
+      <DimensionReadOnly name="pfcDuty" :tooltip="tooltipsConverterWizards['pfcDuty']" :replaceTitle="'Duty @ peak'" :value="pfcDiagnostics.dutyCyclePeak" :unit="null" :numberDecimals="3":labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcDuty'" />
+      <DimensionReadOnly name="pfcIlPk" :tooltip="tooltipsConverterWizards['pfcIlPk']" :replaceTitle="'I_L peak'" :value="pfcDiagnostics.peakInductorCurrent" unit="A" :numberDecimals="3":labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcIlPk'" />
+      <DimensionReadOnly name="pfcIlRipple" :tooltip="tooltipsConverterWizards['pfcIlRipple']" :replaceTitle="'I_L ripple'" :value="pfcDiagnostics.inductorRipple" unit="A" :numberDecimals="3":labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcIlRipple'" />
+      <DimensionReadOnly name="pfcIline" :tooltip="tooltipsConverterWizards['pfcIline']" :replaceTitle="'I_line rms'" :value="pfcDiagnostics.lineRmsCurrent" unit="A" :numberDecimals="3":labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcIline'" />
+      <DimensionReadOnly name="pfcPin" :tooltip="tooltipsConverterWizards['pfcPin']" :replaceTitle="'P_in'" :value="pfcDiagnostics.inputPower" unit="W" :numberDecimals="1":labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-PfcPin'" />
     </template>
   </ConverterWizardBase>
 </template>

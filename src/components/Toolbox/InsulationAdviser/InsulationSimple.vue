@@ -1,13 +1,13 @@
 <script setup>
-import { toTitleCase, getMultiplier } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromListRadio from '/WebSharedComponents/DataInput/ElementFromListRadio.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import SeveralElementsFromList from '/WebSharedComponents/DataInput/SeveralElementsFromList.vue'
-import { minimumMaximumScalePerParameter} from '/WebSharedComponents/assets/js/defaults.js'
-import { Cti, InsulationType, OvervoltageCategory, PollutionDegree, InsulationStandards } from '/WebSharedComponents/assets/ts/MAS.ts'
-import * as Utils from '/WebSharedComponents/assets/js/utils.js'
-import { WiringTechnology } from '/WebSharedComponents/assets/ts/MAS.ts'
+import { toTitleCase, getMultiplier } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import ElementFromListRadio from 'WebSharedComponents/DataInput/ElementFromListRadio.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import SeveralElementsFromList from 'WebSharedComponents/DataInput/SeveralElementsFromList.vue'
+import { minimumMaximumScalePerParameter} from 'WebSharedComponents/assets/js/defaults.js'
+import { CTI as Cti, InsulationType, OvervoltageCategory, PollutionDegree, InsulationStandards } from 'WebSharedComponents/assets/ts/MAS.ts'
+import * as Utils from 'WebSharedComponents/assets/js/utils.js'
+import { WiringTechnology } from 'WebSharedComponents/assets/ts/MAS.ts'
 </script>
 
 <script>
@@ -35,11 +35,11 @@ export default {
         },
         valueFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         titleFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         labelBgColor: {
             type: [String, Object],
@@ -59,13 +59,31 @@ export default {
         },
     },
     data() {
-        const wiringTechnologyToDisable = ["Deposition"]
+        const wiringTechnologyToDisable = [WiringTechnology.Deposition]
 
         return {
             wiringTechnologyToDisable,
         }
     },
     computed: {
+        ctiLabels() {
+            return { groupI: 'Group I', groupII: 'Group II', groupIIIA: 'Group IIIA', groupIIIB: 'Group IIIB' };
+        },
+        insulationTypeLabels() {
+            const out = {};
+            Object.values(InsulationType).forEach(v => { out[v] = v.charAt(0).toUpperCase() + v.slice(1); });
+            return out;
+        },
+        overvoltageCategoryLabels() {
+            const out = {};
+            Object.values(OvervoltageCategory).forEach(v => { out[v] = `OVC ${v}`; });
+            return out;
+        },
+        pollutionDegreeLabels() {
+            const out = {};
+            Object.values(PollutionDegree).forEach(v => { out[v] = v.replace(/^PD/, 'PD '); });
+            return out;
+        },
     },
     watch: { 
     },
@@ -84,7 +102,7 @@ export default {
         <!-- Section: Environment -->
         <div class="is-subsection">
             <div class="is-subsection-header">
-                <i class="fa-solid fa-mountain-sun"></i>
+                <i class="pi pi-sun"></i>
                 <span>Environment</span>
             </div>
             <div class="is-grid is-grid-3">
@@ -162,7 +180,7 @@ export default {
         <!-- Section: Classification -->
         <div class="is-subsection">
             <div class="is-subsection-header">
-                <i class="fa-solid fa-list-check"></i>
+                <i class="pi pi-list"></i>
                 <span>Classification</span>
             </div>
             <div class="is-grid is-grid-2">
@@ -170,11 +188,13 @@ export default {
                     <ElementFromList
                         :dataTestLabel="dataTestLabel + '-Cti'"
                         :name="'cti'"
-                        :titleSameRow="false"
+                        :titleSameRow="true"
                         :justifyContent="false"
                         v-model="modelValue['insulation']"
                         :options="Object.values(Cti)"
-                        :labelWidthProportionClass="'col-12'"
+                        :optionLabels="ctiLabels"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :selectStyleClass="'col-12'"
                         :labelFontSize='titleFontSize'
                         :valueFontSize="valueFontSize"
@@ -189,11 +209,13 @@ export default {
                     <ElementFromList
                         :dataTestLabel="dataTestLabel + '-InsulationType'"
                         :name="'insulationType'"
-                        :titleSameRow="false"
+                        :titleSameRow="true"
                         :justifyContent="false"
                         v-model="modelValue['insulation']"
                         :options="Object.values(InsulationType)"
-                        :labelWidthProportionClass="'col-12'"
+                        :optionLabels="insulationTypeLabels"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :selectStyleClass="'col-12'"
                         :labelFontSize='titleFontSize'
                         :valueFontSize="valueFontSize"
@@ -208,11 +230,13 @@ export default {
                     <ElementFromList
                         :dataTestLabel="dataTestLabel + '-OvervoltageCategory'"
                         :name="'overvoltageCategory'"
-                        :titleSameRow="false"
+                        :titleSameRow="true"
                         :justifyContent="false"
                         v-model="modelValue['insulation']"
                         :options="Object.values(OvervoltageCategory)"
-                        :labelWidthProportionClass="'col-12'"
+                        :optionLabels="overvoltageCategoryLabels"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :selectStyleClass="'col-12'"
                         :labelFontSize='titleFontSize'
                         :valueFontSize="valueFontSize"
@@ -227,11 +251,13 @@ export default {
                     <ElementFromList
                         :dataTestLabel="dataTestLabel + '-PollutionDegree'"
                         :name="'pollutionDegree'"
-                        :titleSameRow="false"
+                        :titleSameRow="true"
                         :justifyContent="false"
                         v-model="modelValue['insulation']"
                         :options="Object.values(PollutionDegree)"
-                        :labelWidthProportionClass="'col-12'"
+                        :optionLabels="pollutionDegreeLabels"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :selectStyleClass="'col-12'"
                         :labelFontSize='titleFontSize'
                         :valueFontSize="valueFontSize"
@@ -248,7 +274,7 @@ export default {
         <!-- Section: Standards -->
         <div class="is-subsection">
             <div class="is-subsection-header">
-                <i class="fa-solid fa-certificate"></i>
+                <i class="pi pi-verified"></i>
                 <span>Standards</span>
             </div>
             <div class="is-standards">
@@ -279,7 +305,7 @@ export default {
 }
 
 .is-section-title {
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-weight: 700;
     font-size: 1rem;
     letter-spacing: 0.01em;
@@ -288,9 +314,9 @@ export default {
 
 .is-subsection {
     background: linear-gradient(180deg,
-        rgba(var(--bs-primary-rgb), 0.05) 0%,
-        rgba(var(--bs-primary-rgb), 0.015) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+        rgba(var(--p-primary-rgb), 0.05) 0%,
+        rgba(var(--p-primary-rgb), 0.015) 100%);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.15);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -300,9 +326,9 @@ export default {
     align-items: center;
     gap: 0.4rem;
     padding: 0.35rem 0.7rem;
-    background: rgba(var(--bs-primary-rgb), 0.08);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
-    color: var(--bs-primary);
+    background: rgba(var(--p-primary-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.12);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.7rem;
     letter-spacing: 0.05em;
@@ -311,7 +337,7 @@ export default {
 
 .is-subsection-header i {
     font-size: 0.78rem;
-    filter: drop-shadow(0 0 3px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 3px rgba(var(--p-primary-rgb), 0.45));
 }
 
 .is-grid {
@@ -337,16 +363,43 @@ export default {
 
 .is-cell {
     min-width: 0;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(var(--p-white-rgb), 0.025);
+    border: 1px solid rgba(var(--p-white-rgb), 0.06);
     border-radius: 9px;
     padding: 0.45rem 0.6rem 0.55rem 0.6rem;
     transition: background 0.15s, border-color 0.15s;
+    overflow: hidden;
+}
+.is-cell :deep(.p-inputgroup),
+.is-cell :deep(.dwt-group) { width: 100%; }
+.is-cell :deep(.p-inputnumber),
+.is-cell :deep(.p-inputnumber > input) {
+    min-width: 0;
+    flex: 1 1 auto;
+    width: 100%;
+}
+/* Only constrain the unit selector inside input groups (Dimension's
+ * .dwt-unit-addon), not standalone dropdowns like CTI / Insulation Type. */
+.is-cell :deep(.p-inputgroup .p-select),
+.is-cell :deep(.dwt-unit-addon .p-select),
+.is-cell :deep(.dwt-unit-addon) {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 4.5rem;
+}
+
+/* Standalone dropdowns (CTI, Insulation Type, Overvoltage Category,
+ * Pollution Degree) should fill their column width — value column wraps
+ * the .p-select in a col-N div, so target it through that wrapper. */
+.is-grid-2 .is-cell :deep([class*="col-"] > .p-select),
+.is-grid-2 .is-cell :deep([class*="col-"] .p-select) {
+    width: 100% !important;
+    max-width: none !important;
 }
 
 .is-cell:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(var(--bs-primary-rgb), 0.25);
+    background: rgba(var(--p-white-rgb), 0.05);
+    border-color: rgba(var(--p-primary-rgb), 0.25);
 }
 
 .is-cell :deep(.row),
@@ -355,11 +408,19 @@ export default {
     margin-right: 0 !important;
 }
 
+/* Wiring Technology radio group — force 2 columns × 2 rows (was 1×4). */
+.is-cell :deep(.efr-options-row) {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 0.5rem;
+    row-gap: 0.35rem;
+}
+
 /* Uppercase pill caption above each input */
 .is-cell :deep(.dim-label),
 .is-cell :deep(.efl-label),
 .is-cell :deep(label) {
-    color: rgba(242, 242, 242, 0.65) !important;
+    color: rgba(var(--p-white-rgb), 0.65) !important;
     font-size: 0.66rem !important;
     font-weight: 700 !important;
     letter-spacing: 0.05em;
@@ -380,7 +441,7 @@ export default {
 
 /* Wiring Technology radio: keep its own labels readable, not uppercased */
 .is-cell :deep(.form-check-label) {
-    color: rgba(242, 242, 242, 0.85) !important;
+    color: rgba(var(--p-white-rgb), 0.85) !important;
     font-size: 0.78rem !important;
     font-weight: 500 !important;
     letter-spacing: 0;

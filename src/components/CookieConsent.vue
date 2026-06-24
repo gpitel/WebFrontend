@@ -23,6 +23,19 @@ function loadHotjar() {
     })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
 }
 
+// Self-hosted Umami (product analytics) served same-origin under /stats.
+// Lights up window.umami.track(), which telemetry.js already calls for every
+// design_report / design_export / builder_snapshot. data-domains restricts
+// recording to production so dev/beta never pollute the data.
+function loadUmami() {
+    const s = document.createElement('script');
+    s.defer = true;
+    s.src = '/stats/script.js';
+    s.setAttribute('data-website-id', 'd27f555e-a992-49a4-a104-b2ff8f26c16f');
+    s.setAttribute('data-domains', 'openmagnetics.com');
+    document.head.appendChild(s);
+}
+
 export default {
     data() {
         return { showBanner: false };
@@ -56,6 +69,7 @@ export default {
             if (window.location.hostname === 'localhost') return;
             loadGTM();
             loadHotjar();
+            loadUmami();
         },
     },
 };
@@ -67,7 +81,7 @@ export default {
             <div class="om-consent-inner">
 
                 <div class="om-consent-icon-wrap">
-                    <i class="fa-solid fa-cookie-bite"></i>
+                    <i class="pi pi-cookie"></i>
                 </div>
 
                 <div class="om-consent-text">
@@ -86,10 +100,10 @@ export default {
 
                 <div class="om-consent-actions">
                     <button class="om-consent-btn om-consent-decline" @click="decline">
-                        <i class="fa-solid fa-shield-halved me-1"></i>Essential only
+                        <i class="pi pi-shield mr-1"></i>Essential only
                     </button>
                     <button class="om-consent-btn om-consent-accept" @click="accept">
-                        Accept &amp; close the loop <i class="fa-solid fa-bolt ms-1"></i>
+                        Accept &amp; close the loop <i class="pi pi-bolt ml-1"></i>
                     </button>
                 </div>
 
@@ -108,15 +122,15 @@ export default {
     z-index: 9999;
     background:
         linear-gradient(135deg,
-            rgba(var(--bs-primary-rgb), 0.06) 0%,
-            rgba(var(--bs-primary-rgb), 0.02) 100%),
-        rgba(var(--bs-dark-rgb), 0.97);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.3);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.75);
+            rgba(var(--p-primary-rgb), 0.06) 0%,
+            rgba(var(--p-primary-rgb), 0.02) 100%),
+        rgba(var(--p-dark-rgb), 0.97);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.3);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.75);
     border-radius: 14px;
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.6),
-        inset 0 1px 0 rgba(var(--bs-primary-rgb), 0.08);
+        0 8px 32px rgba(var(--p-black-rgb), 0.6),
+        inset 0 1px 0 rgba(var(--p-primary-rgb), 0.08);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     padding: 1.1rem 1.25rem;
@@ -134,15 +148,15 @@ export default {
     width: 2.8rem;
     height: 2.8rem;
     border-radius: 50%;
-    background: rgba(var(--bs-primary-rgb), 0.12);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.3);
+    background: rgba(var(--p-primary-rgb), 0.12);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.3);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     font-size: 1.2rem;
-    color: var(--bs-primary);
-    filter: drop-shadow(0 0 6px rgba(var(--bs-primary-rgb), 0.35));
+    color: var(--p-primary);
+    filter: drop-shadow(0 0 6px rgba(var(--p-primary-rgb), 0.35));
 }
 
 /* Text block */
@@ -155,12 +169,12 @@ export default {
 }
 
 .om-consent-title {
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-size: 0.88rem;
 }
 
 .om-consent-subtitle {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(var(--p-white-rgb), 0.35);
     font-size: 0.75rem;
     font-weight: 400;
     font-style: italic;
@@ -168,25 +182,25 @@ export default {
 }
 
 .om-consent-body {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(var(--p-white-rgb), 0.6);
     font-size: 0.78rem;
     margin: 0;
     line-height: 1.55;
 }
 
 .om-consent-body strong {
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(var(--p-white-rgb), 0.85);
     font-weight: 600;
 }
 
 .om-consent-link {
-    color: rgba(var(--bs-primary-rgb), 0.8);
+    color: rgba(var(--p-primary-rgb), 0.8);
     text-decoration: underline;
     text-underline-offset: 2px;
     transition: color 0.15s;
 }
 .om-consent-link:hover {
-    color: var(--bs-primary);
+    color: var(--p-primary);
 }
 
 /* Buttons */
@@ -213,24 +227,24 @@ export default {
 
 .om-consent-decline {
     background: transparent;
-    color: rgba(255, 255, 255, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: rgba(var(--p-white-rgb), 0.5);
+    border: 1px solid rgba(var(--p-white-rgb), 0.18);
 }
 .om-consent-decline:hover {
-    color: rgba(255, 255, 255, 0.85);
-    border-color: rgba(255, 255, 255, 0.38);
-    background: rgba(255, 255, 255, 0.05);
+    color: rgba(var(--p-white-rgb), 0.85);
+    border-color: rgba(var(--p-white-rgb), 0.38);
+    background: rgba(var(--p-white-rgb), 0.05);
 }
 
 .om-consent-accept {
-    background: var(--bs-primary);
-    color: var(--bs-dark);
-    border: 1px solid var(--bs-primary);
-    box-shadow: 0 2px 10px rgba(var(--bs-primary-rgb), 0.35);
+    background: var(--p-primary);
+    color: var(--p-dark);
+    border: 1px solid var(--p-primary);
+    box-shadow: 0 2px 10px rgba(var(--p-primary-rgb), 0.35);
 }
 .om-consent-accept:hover {
     filter: brightness(1.1);
-    box-shadow: 0 4px 16px rgba(var(--bs-primary-rgb), 0.45);
+    box-shadow: 0 4px 16px rgba(var(--p-primary-rgb), 0.45);
 }
 
 /* Slide-up enter/leave */

@@ -1,15 +1,19 @@
 <script setup>
+import { IsolationSide } from 'WebSharedComponents/assets/ts/MAS.ts'
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
-import { combinedStyle, combinedClass, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromListRadio from '/WebSharedComponents/DataInput/ElementFromListRadio.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import PairOfDimensions from '/WebSharedComponents/DataInput/PairOfDimensions.vue'
-import TripleOfDimensions from '/WebSharedComponents/DataInput/TripleOfDimensions.vue'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import { defaultForwardWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from '/WebSharedComponents/assets/js/defaults.js'
+import { combinedStyle, combinedClass, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import DimensionReadOnly from 'WebSharedComponents/DataInput/DimensionReadOnly.vue'
+import ElementFromListRadio from 'WebSharedComponents/DataInput/ElementFromListRadio.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import PairOfDimensions from 'WebSharedComponents/DataInput/PairOfDimensions.vue'
+import TripleOfDimensions from 'WebSharedComponents/DataInput/TripleOfDimensions.vue'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import { defaultForwardWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from 'WebSharedComponents/assets/js/defaults.js'
 import ConverterWizardBase from './ConverterWizardBase.vue'
+import CompactVoltageInput from './CompactVoltageInput.vue'
+import { tooltipsConverterWizards, dropdownLabelsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
 
 <script>
@@ -22,27 +26,28 @@ export default {
         },
         dataTestLabel: {
             type: String,
-            default: 'CmcWizard',
+            default: 'ForwardWizard',
         },
         labelWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-9'
+            default: 'col-12 md:col-9'
         },
         valueWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-3'
+            default: 'col-12 md:col-3'
         },
     },
     data() {
         const masStore = useMasStore();
         const taskQueueStore = useTaskQueueStore();
         const designLevelOptions = ['Help me with the design', 'I know the design I want'];
-        const insulationTypes = ['No', 'Basic', 'Reinforced'];
+        const insulationTypes = ['no', 'basic', 'reinforced'];
         const errorMessage = "";
         var localData = deepCopy(defaultForwardWizardInputs);
         return {
+            forwardDiagnostics: null,
             masStore,
-            taskQueueStore,
+            taskQueueStore, dropdownLabelsConverterWizards,
             designLevelOptions,
             insulationTypes,
             localData,
@@ -59,16 +64,16 @@ export default {
             waveformViewMode: 'magnetic',
             forceWaveformUpdate: 0,
             numberOfPeriods: 2,
-            numberOfSteadyStatePeriods: 20,
+            numberOfSteadyStatePeriods: 50,
         }
     },
     computed: {
         wizardIcon() {
             switch (this.converterName) {
-                case 'Single-Switch Forward': return 'fa-toggle-off';
-                case 'Two-Switch Forward': return 'fa-toggle-on';
-                case 'Active Clamp Forward': return 'fa-compress';
-                default: return 'fa-arrow-right';
+                case 'Single-Switch Forward': return 'pi pi-circle-off';
+                case 'Two-Switch Forward': return 'pi pi-circle-on';
+                case 'Active Clamp Forward': return 'pi pi-arrows-h-angle-contract';
+                default: return 'pi pi-arrow-right';
             }
         },
         wizardSubtitle() {
@@ -87,15 +92,33 @@ export default {
             });
         },
     },
+    mounted() {
+        this.$nextTick(() => {
+            if (this._autoRunDone) return;
+            this._autoRunDone = true;
+            try { this.updateErrorMessage?.(); } catch (e) { return; }
+            if (!this.errorMessage) this.simulateIdealWaveforms?.();
+        });
+    },
     methods: {
 
     // ===== WIZARD CONTRACT =====
     buildParams(mode) {
       const aux = {};
       aux['inputVoltage'] = this.localData.inputVoltage;
+      aux['switchingFrequency'] = this.localData.switchingFrequency;
       aux['diodeVoltageDrop'] = this.localData.diodeVoltageDrop;
       aux['efficiency'] = this.localData.efficiency;
       aux['converterType'] = this.converterName;
+      // currentRippleRatio is required by both regular and Advanced from_json
+      // (used for output current ripple even when desiredInductance is given)
+      aux['currentRippleRatio'] = this.localData.currentRippleRatio;
+      // maximumSwitchCurrent is an optional cap — send only when explicitly
+      // set (>0). Backend treats it as an additional constraint alongside
+      // the ripple-derived inductor design.
+      if (this.localData.maximumSwitchCurrent > 0) {
+        aux['maximumSwitchCurrent'] = this.localData.maximumSwitchCurrent;
+      }
       if (this.localData.designLevel == 'I know the design I want') {
         aux['desiredInductance'] = this.localData.inductance;
         const auxDesiredDutyCycle = [];
@@ -103,10 +126,17 @@ export default {
         if (this.localData.inputVoltage.nominal != null && this.localData.dutyCycle.nominal != null) auxDesiredDutyCycle.push(this.localData.dutyCycle.nominal);
         if (this.localData.inputVoltage.maximum != null && this.localData.dutyCycle.maximum != null) auxDesiredDutyCycle.push(this.localData.dutyCycle.maximum);
         aux['desiredDutyCycle'] = [auxDesiredDutyCycle];
-        aux['desiredTurnsRatios'] = this.localData.outputsParameters.map(e => e.turnsRatio);
+        const secondaryTurnsRatios = this.localData.outputsParameters.map(e => e.turnsRatio);
+        // Single-Switch Forward requires an extra leading turns ratio for the
+        // demagnetization winding (1:1 with primary is the standard choice).
+        // Two-Switch Forward and Active Clamp Forward use one ratio per output.
+        if (this.converterName === 'Single-Switch Forward') {
+          aux['desiredTurnsRatios'] = [1.0, ...secondaryTurnsRatios];
+        } else {
+          aux['desiredTurnsRatios'] = secondaryTurnsRatios;
+        }
       } else {
         aux['maximumDutyCycle'] = this.localData.maximumDutyCycle;
-        aux['currentRippleRatio'] = this.localData.currentRippleRatio;
       }
       const auxOp = { outputVoltages: [], outputCurrents: [] };
       this.localData.outputsParameters.forEach(e => { auxOp.outputVoltages.push(e.voltage); auxOp.outputCurrents.push(e.current); });
@@ -128,22 +158,26 @@ export default {
     getSimulateFn() { return (aux) => this.taskQueueStore.simulateForwardIdealWaveforms(aux); },
     getDefaultFrequency() { return this.localData.switchingFrequency; },
     postProcessResults(result, mode) {
+            this.forwardDiagnostics = result?.singleSwitchForwardDiagnostics ?? result?.twoSwitchForwardDiagnostics ?? result?.activeClampForwardDiagnostics ?? null;
       if (this.designRequirements) {
         this.simulatedMagnetizingInductance = this.designRequirements.magnetizingInductance?.nominal || null;
         this.simulatedTurnsRatios = this.designRequirements.turnsRatios?.map(tr => tr.nominal) || null;
       }
     },
-    getTopology() { 
+    getTopology() {
       const topologyMap = {
-        'Single-Switch Forward': 'Single Switch Forward Converter',
-        'Two-Switch Forward': 'Two Switch Forward Converter',
-        'Active Clamp Forward': 'Active Clamp Forward Converter',
+        'Single-Switch Forward': 'singleSwitchForwardConverter',
+        'Two-Switch Forward':    'twoSwitchForwardConverter',
+        'Active Clamp Forward':  'activeClampForwardConverter',
       };
-      return topologyMap[this.converterName] || this.converterName + ' Converter';
+      if (!topologyMap[this.converterName]) {
+        throw new Error(`ForwardWizard: unknown converterName '${this.converterName}'`);
+      }
+      return topologyMap[this.converterName];
     },
     getIsolationSides() {
-      const sides = ['primary'];
-      for (let i = 0; i < this.localData.outputsParameters.length; i++) sides.push('secondary');
+      const sides = [IsolationSide.Primary];
+      for (let i = 0; i < this.localData.outputsParameters.length; i++) sides.push(IsolationSide.Secondary);
       return sides;
     },
     getInsulationType() { return this.localData.insulationType; },
@@ -235,16 +269,8 @@ export default {
         buildConverterWaveformsFromInputs(operatingPoints) {
             const converterWaveforms = [];
             
-            console.log('[buildConverterWaveformsFromInputs] Building converter waveforms from', operatingPoints.length, 'operating points');
-            console.log('[buildConverterWaveformsFromInputs] Converter type:', this.converterName);
-            
             for (let opIdx = 0; opIdx < operatingPoints.length; opIdx++) {
                 const op = operatingPoints[opIdx];
-                console.log(`[buildConverterWaveformsFromInputs] OP ${opIdx}:`, {
-                    outputVoltages: op.outputVoltages?.length || 0,
-                    outputCurrents: op.outputCurrents?.length || 0,
-                    excitations: op.excitationsPerWinding?.length || 0
-                });
                 
                 const opWaveforms = {
                     frequency: op.excitationsPerWinding?.[0]?.frequency || this.localData.switchingFrequency,
@@ -257,7 +283,6 @@ export default {
                     for (let outIdx = 0; outIdx < op.outputVoltages.length; outIdx++) {
                         if (op.outputVoltages[outIdx].waveform) {
                             const label = op.outputVoltages.length === 1 ? 'Output Voltage' : `Output ${outIdx + 1} Voltage`;
-                            console.log(`[buildConverterWaveformsFromInputs] Adding voltage: ${label}`);
                             opWaveforms.waveforms.push({
                                 label: label,
                                 x: op.outputVoltages[outIdx].waveform.time,
@@ -276,21 +301,13 @@ export default {
                 const isSingleSwitch = this.converterName === "Single-Switch Forward";
                 const firstOutputIndex = isSingleSwitch ? 2 : 1; // Skip demagnetization winding for Single-Switch
                 
-                console.log(`[buildConverterWaveformsFromInputs] Looking for currents starting at index ${firstOutputIndex} (isSingleSwitch=${isSingleSwitch})`);
-                
                 let outputCurrentIdx = 0;
                 for (let windingIdx = firstOutputIndex; windingIdx < excitations.length; windingIdx++) {
                     const excitation = excitations[windingIdx];
-                    console.log(`[buildConverterWaveformsFromInputs] Checking excitation at index ${windingIdx}:`, {
-                        hasCurrent: !!excitation.current?.waveform,
-                        hasTime: !!excitation.current?.waveform?.time,
-                        hasData: !!excitation.current?.waveform?.data
-                    });
                     if (excitation.current?.waveform?.time && excitation.current?.waveform?.data) {
                         // Label as Output Current to match Output Voltage for pairing
                         const numOutputs = excitations.length - firstOutputIndex;
                         const label = numOutputs === 1 ? 'Output Current' : `Output ${outputCurrentIdx + 1} Current`;
-                        console.log(`[buildConverterWaveformsFromInputs] Adding current: ${label}`);
                         opWaveforms.waveforms.push({
                             label: label,
                             x: excitation.current.waveform.time,
@@ -322,11 +339,7 @@ export default {
                 }
                 
                 converterWaveforms.push(opWaveforms);
-                console.log(`[buildConverterWaveformsFromInputs] OP ${opIdx} final waveforms count:`, opWaveforms.waveforms.length);
-                console.log(`[buildConverterWaveformsFromInputs] OP ${opIdx} waveform labels:`, opWaveforms.waveforms.map(w => w.label));
             }
-            
-            console.log('[buildConverterWaveformsFromInputs] Final converter waveforms:', converterWaveforms);
             return converterWaveforms;
         },
                                                 }
@@ -338,7 +351,7 @@ export default {
   <ConverterWizardBase
     ref="base"
     :title="converterName + ' Wizard'"
-    titleIcon="fa-bolt"
+    titleIcon="pi pi-bolt"
     :col1Width="3" :col2Width="4" :col3Width="5"
     :magneticWaveforms="magneticWaveforms"
     :converterWaveforms="converterWaveforms"
@@ -361,7 +374,7 @@ export default {
   >
     <template #design-mode>
       <ElementFromListRadio
-        :name="'designLevel'" :dataTestLabel="dataTestLabel + '-DesignLevel'"
+        :name="'designLevel'" :tooltip="tooltipsConverterWizards['designLevel']" :dataTestLabel="dataTestLabel + '-DesignLevel'"
         :replaceTitle="''" :options="designLevelOptions" :titleSameRow="false"
         v-model="localData"
         :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-12'"
@@ -374,12 +387,12 @@ export default {
     </template>
 
     <template #design-or-switch-parameters-title>
-      <div v-if="localData.designLevel == 'I know the design I want'" class="compact-header"><i class="fa-solid fa-cogs me-1"></i>Design Params</div>
+      <div v-if="localData.designLevel == 'I know the design I want'" class="compact-header"><i class="pi pi-cog-wide-connected mr-1"></i>Design Params</div>
     </template>
 
     <template #design-or-switch-parameters>
       <div v-if="localData.designLevel == 'I know the design I want'">
-        <Dimension :name="'inductance'" :replaceTitle="'Inductance'" unit="H"
+        <Dimension :name="'inductance'" :tooltip="tooltipsConverterWizards['inductance']" :replaceTitle="'Inductance'" unit="H"
           :dataTestLabel="dataTestLabel + '-Inductance'"
           :min="minimumMaximumScalePerParameter['inductance']['min']"
           :max="minimumMaximumScalePerParameter['inductance']['max']"
@@ -391,7 +404,7 @@ export default {
           :textColor="$styleStore.wizard.inputTextColor"
           @update="updateErrorMessage"
         />
-        <DimensionWithTolerance :name="'dutyCycle'" :replaceTitle="'Duty Cycle'" :unit="null"
+        <DimensionWithTolerance :name="'dutyCycle'" :tooltip="tooltipsConverterWizards['dutyCycle']" :replaceTitle="'Duty Cycle'" :unit="null"
           :dataTestLabel="dataTestLabel + '-DutyCycle'"
           :min="0.01" :max="0.99"
           :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
@@ -409,7 +422,7 @@ export default {
     </template>
 
     <template #conditions>
-      <Dimension :name="'switchingFrequency'" :replaceTitle="'Sw. Freq'" unit="Hz"
+      <Dimension :name="'switchingFrequency'" :tooltip="tooltipsConverterWizards['switchingFrequency']" :replaceTitle="'Sw. Freq'" unit="Hz"
         :dataTestLabel="dataTestLabel + '-SwitchingFrequency'"
         :min="minimumMaximumScalePerParameter['frequency']['min']"
         :max="minimumMaximumScalePerParameter['frequency']['max']"
@@ -421,7 +434,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'ambientTemperature'" :replaceTitle="'Temp'" unit=" C"
+      <Dimension :name="'ambientTemperature'" :tooltip="tooltipsConverterWizards['ambientTemperature']" :replaceTitle="'Temp'" unit=" C"
         :dataTestLabel="dataTestLabel + '-AmbientTemperature'"
         :min="minimumMaximumScalePerParameter['temperature']['min']"
         :max="minimumMaximumScalePerParameter['temperature']['max']"
@@ -434,7 +447,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'diodeVoltageDrop'" :replaceTitle="'Diode Vd'" unit="V"
+      <Dimension :name="'diodeVoltageDrop'" :tooltip="tooltipsConverterWizards['diodeVoltageDrop']" :replaceTitle="'Diode Vd'" unit="V"
         :dataTestLabel="dataTestLabel + '-DiodeVoltageDrop'" :min="0" :max="10"
         v-model="localData"
         :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
@@ -444,7 +457,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'efficiency'" :replaceTitle="'Eff'" unit="%" :visualScale="100"
+      <Dimension :name="'efficiency'" :tooltip="tooltipsConverterWizards['efficiency']" :replaceTitle="'Efficiency'" unit="%" :visualScale="100"
         :dataTestLabel="dataTestLabel + '-Efficiency'" :min="0.5" :max="1"
         v-model="localData"
         :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
@@ -454,7 +467,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <ElementFromList :name="'insulationType'" :replaceTitle="'Insul'" :options="insulationTypes"
+      <ElementFromList :name="'insulationType'" :tooltip="tooltipsConverterWizards['insulationType']" :replaceTitle="'Insulation'" :options="insulationTypes" :optionLabels="dropdownLabelsConverterWizards.insulationType"
         :titleSameRow="true" v-model="localData"
         :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
         :valueFontSize="$styleStore.wizard.inputFontSize"
@@ -467,36 +480,28 @@ export default {
 
     <template #col1-footer>
       <div class="d-flex align-items-center justify-content-between mt-2">
-        <span v-if="errorMessage" class="error-text"><i class="fa-solid fa-exclamation-triangle me-1"></i>{{ errorMessage }}</span>
+        <span v-if="errorMessage" class="error-text"><i class="pi pi-exclamation-triangle mr-1"></i>{{ errorMessage }}</span>
         <span v-else></span>
         <div class="action-btns">
-          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="fa-solid fa-magnifying-glass me-1"></i>Review Specs</button>
-          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Design Magnetic</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="pi pi-search mr-1"></i>Review Specs</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="pi pi-sparkles mr-1"></i>Design Magnetic</button>
         </div>
       </div>
     </template>
-
     <template #input-voltage>
-      <DimensionWithTolerance :name="'inputVoltage'" :replaceTitle="''" unit="V"
+      <CompactVoltageInput
+        :name="'inputVoltage'"
+        :tooltip="tooltipsConverterWizards['inputVoltage']"
         :dataTestLabel="dataTestLabel + '-InputVoltage'"
-        :min="minimumMaximumScalePerParameter['voltage']['min']"
-        :max="minimumMaximumScalePerParameter['voltage']['max']"
-        :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-4'"
-        v-model="localData.inputVoltage" :severalRows="true"
-        :addButtonStyle="$styleStore.wizard.addButton"
-        :removeButtonBgColor="$styleStore.wizard.removeButton['background-color']"
-        :titleFontSize="$styleStore.wizard.inputLabelFontSize"
-        :valueFontSize="$styleStore.wizard.inputFontSize"
-        :labelFontSize="$styleStore.wizard.inputLabelFontSize"
-        :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor"
-        :textColor="$styleStore.wizard.inputTextColor"
+        unit="V"
+        :modelValue="localData.inputVoltage"
         @update="updateErrorMessage"
       />
     </template>
 
     <template #outputs>
       <div class="mb-3">
-        <ElementFromList :name="'numberOutputs'" :replaceTitle="'Number of Outputs'"
+        <ElementFromList :name="'numberOutputs'" :tooltip="tooltipsConverterWizards['numberOutputs']" :replaceTitle="'Number of Outputs'"
           :dataTestLabel="dataTestLabel + '-NumberOutputs'"
           :options="Array.from({length: 10}, (_, i) => i + 1)"
           :titleSameRow="true" v-model="localData"
@@ -544,6 +549,47 @@ export default {
           @update="updateErrorMessage"
         />
       </div>
+    </template>
+    <template v-if="forwardDiagnostics" #diagnostics>
+      <table
+        v-if="Array.isArray(forwardDiagnostics.perOp) && forwardDiagnostics.perOp.length > 1"
+        class="diagnostics-perop-table"
+        :data-cy="dataTestLabel + '-Forward-perOp-table'"
+        :style="{ color: $styleStore.wizard.inputTextColor, fontSize: $styleStore.wizard.inputFontSize, width: '100%', borderCollapse: 'collapse' }"
+      >
+        <thead>
+          <tr>
+            <th :style="{ textAlign: 'left', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }"></th>
+            <th v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }">
+              {{ op.operatingPointName || ('OP ' + i) }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Duty max</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.maximumDutyCycle).toFixed(3) }}</td></tr>
+          <tr><td>Mag. Ind. (H)</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.magnetizingInductance).toFixed(3) }}</td></tr>
+          <tr><td>Turns ratio</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.secondaryTurnsRatio).toFixed(3) }}</td></tr>
+          <tr><td>Mode</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ op.isCcm ? 'CCM' : 'DCM' }}</td></tr>
+          <tr><td>I_pri peak (A)</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.primaryPeakCurrent).toFixed(3) }}</td></tr>
+          <tr><td>I_sec peak (A)</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.secondaryPeakCurrent).toFixed(3) }}</td></tr>
+          <tr><td>I_mag peak (A)</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.magnetizingPeakCurrent).toFixed(3) }}</td></tr>
+          <tr v-if="forwardDiagnostics.perOp[0] && forwardDiagnostics.perOp[0].resetVoltage !== undefined"><td>Reset V (V)</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.resetVoltage).toFixed(3) }}</td></tr>
+          <tr v-if="forwardDiagnostics.perOp[0] && forwardDiagnostics.perOp[0].clampCapVoltage !== undefined"><td>Clamp Cap. V (V)</td><td v-for="(op, i) in forwardDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.clampCapVoltage).toFixed(3) }}</td></tr>
+        </tbody>
+      </table>
+      <template v-else>
+      <DimensionReadOnly name="fwdDuty"          :tooltip="tooltipsConverterWizards['fwdDuty']"          :replaceTitle="'Duty max'"        :value="forwardDiagnostics.maximumDutyCycle"            :unit="null" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdDuty'" />
+      <DimensionReadOnly name="fwdLm"            :tooltip="tooltipsConverterWizards['fwdLm']"            :replaceTitle="'Mag. Ind.'"       :value="forwardDiagnostics.magnetizingInductance"       unit="H" :numberDecimals="9" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdLm'" />
+      <DimensionReadOnly name="fwdN"             :tooltip="tooltipsConverterWizards['fwdN']"             :replaceTitle="'Turns ratio'"     :value="forwardDiagnostics.secondaryTurnsRatio"         :unit="null" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdN'" />
+      <DimensionReadOnly name="fwdMode"          :tooltip="tooltipsConverterWizards['fwdMode']"          :replaceTitle="'Mode'"            :value="forwardDiagnostics.isCcm ? 'CCM' : 'DCM'"       :unit="null" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdMode'" />
+      <DimensionReadOnly name="fwdIprimPk"       :tooltip="tooltipsConverterWizards['fwdIprimPk']"       :replaceTitle="'I_pri peak'"      :value="forwardDiagnostics.primaryPeakCurrent"          unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdIprimPk'" />
+      <DimensionReadOnly name="fwdIsecPk"        :tooltip="tooltipsConverterWizards['fwdIsecPk']"        :replaceTitle="'I_sec peak'"      :value="forwardDiagnostics.secondaryPeakCurrent"        unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdIsecPk'" />
+      <DimensionReadOnly name="fwdImagPk"        :tooltip="tooltipsConverterWizards['fwdImagPk']"        :replaceTitle="'I_mag peak'"      :value="forwardDiagnostics.magnetizingPeakCurrent"      unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdImagPk'" />
+      <!-- SSF-only: reset voltage on demag winding -->
+      <DimensionReadOnly v-if="forwardDiagnostics.resetVoltage !== undefined" name="fwdReset" :tooltip="tooltipsConverterWizards['fwdReset']" :replaceTitle="'Reset V'" :value="forwardDiagnostics.resetVoltage" unit="V" :numberDecimals="2" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdReset'" />
+      <!-- ACF-only: clamp-cap steady-state voltage -->
+      <DimensionReadOnly v-if="forwardDiagnostics.clampCapVoltage !== undefined" name="fwdClamp" :tooltip="tooltipsConverterWizards['fwdClamp']" :replaceTitle="'Clamp Cap. V'" :value="forwardDiagnostics.clampCapVoltage" unit="V" :numberDecimals="2" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FwdClamp'" />
+    </template>
     </template>
   </ConverterWizardBase>
 </template>

@@ -7,12 +7,12 @@ import WaveformFourier from './Output/WaveformFourier.vue'
 import WaveformOutput from './Output/WaveformOutput.vue'
 import WaveformSimpleOutput from './Output/WaveformSimpleOutput.vue'
 import WaveformCombinedOutput from './Output/WaveformCombinedOutput.vue'
-import { formatFrequency, removeTrailingZeroes, roundWithDecimals, deepCopy, ordinalSuffixOf } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import { combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
+import { formatFrequency, removeTrailingZeroes, roundWithDecimals, deepCopy, ordinalSuffixOf } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import { combinedStyle, combinedClass } from 'WebSharedComponents/assets/js/utils.js'
 
-import { defaultOperatingPointExcitationWithHarmonics, defaultPrecision, defaultSinusoidalNumberPoints } from '/WebSharedComponents/assets/js/defaults.js'
-import { tooltipsMagneticSynthesisOperatingPoints } from '/WebSharedComponents/assets/js/texts.js'
+import { defaultOperatingPointExcitationWithHarmonics, defaultPrecision, defaultSinusoidalNumberPoints } from 'WebSharedComponents/assets/js/defaults.js'
+import { tooltipsMagneticSynthesisOperatingPoints } from 'WebSharedComponents/assets/js/texts.js'
 
 </script>
 <script>
@@ -69,6 +69,13 @@ export default {
         }
     },
     computed: {
+        isInductor() {
+            return this.masStore.mas.inputs.designRequirements.turnsRatios.length === 0;
+        },
+        hasInductance() {
+            const ind = this.masStore.mas.inputs.designRequirements.magnetizingInductance;
+            return ind && (ind.nominal > 0 || ind.minimum > 0);
+        },
     },
     watch: { 
         'currentOperatingPointIndex'(newValue, oldValue) {
@@ -122,6 +129,24 @@ export default {
                 }
             }
             return true;
+        },
+        async induceVoltageFromCurrent() {
+            // Inductor (single-winding) mode: voltage is derived from current via
+            // magnetizing inductance. Mirror OperatingPointManual.induce('current').
+            if (!this.isInductor || !this.hasInductance) return;
+            try {
+                const magnetizingInductance = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.magnetizingInductance);
+                const excitation = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex];
+                const voltage = await this.taskQueueStore.calculateInducedVoltage(excitation, magnetizingInductance);
+                excitation.voltage.waveform = voltage.waveform;
+                excitation.voltage.harmonics = voltage.harmonics;
+                excitation.voltage.processed = voltage.processed;
+                this.masStore.updatedInputExcitationWaveformUpdatedFromProcessed('voltage');
+                this.masStore.updatedInputExcitationProcessed('voltage');
+                this.forceUpdateVoltage += 1;
+            } catch (error) {
+                console.error('[induceVoltageFromCurrent] failed:', error);
+            }
         },
         async processHarmonics(signalDescriptor, windingIndexOverride = null) {
             if (this.processingHarmonics) {
@@ -205,6 +230,9 @@ export default {
 
             if (this.checkFrequencies(signalDescriptor)) {
                 this.processHarmonics(signalDescriptor);
+                if (signalDescriptor == "current" && this.isInductor) {
+                    setTimeout(() => this.induceVoltageFromCurrent(), 600);
+                }
                 this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].frequency = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].current.harmonics.frequencies[1]
 
                 if (this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].voltage.harmonics.frequencies[1] != this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].current.harmonics.frequencies[1]) {
@@ -235,6 +263,11 @@ export default {
                     this.processHarmonics(signalDescriptor);
                     if (signalDescriptor == "current") {
                         this.forceUpdateCurrent += 1;
+                        if (this.isInductor) {
+                            // Voltage is locked to current via L; recompute after WASM
+                            // reconstructs the standardized current signal.
+                            setTimeout(() => this.induceVoltageFromCurrent(), 600);
+                        }
                     }
                     else {
                         this.forceUpdateVoltage += 1;
@@ -257,6 +290,10 @@ export default {
             this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex][signalDescriptor].harmonics.amplitudes.splice(index + 1, 0, newAmplitude);
             if (signalDescriptor == "current") {
                 this.forceUpdateCurrent += 1;
+                if (this.isInductor) {
+                    this.processHarmonics('current');
+                    setTimeout(() => this.induceVoltageFromCurrent(), 600);
+                }
             }
             else {
                 this.forceUpdateVoltage += 1;
@@ -267,6 +304,10 @@ export default {
             this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex][signalDescriptor].harmonics.amplitudes.splice(index, 1);
             if (signalDescriptor == "current") {
                 this.forceUpdateCurrent += 1;
+                if (this.isInductor) {
+                    this.processHarmonics('current');
+                    setTimeout(() => this.induceVoltageFromCurrent(), 600);
+                }
             }
             else {
                 this.forceUpdateVoltage += 1;
@@ -279,23 +320,23 @@ export default {
 <template>
     <div class="oph-container">
         <div class="row g-2 m-0">
-            <div class="col-lg-5 col-md-12 oph-col">
+            <div class="col-12 lg:col-5 oph-col">
 
                 <div class="oph-title" :data-cy="dataTestLabel + '-current-title'">
-                    <i class="fa-solid fa-bullseye"></i>
+                    <i class="pi pi-bullseye"></i>
                     <span>{{masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].name + ' — ' + masStore.mas.magnetic.coil.functionalDescription[currentWindingIndex].name}}</span>
                 </div>
 
                 <div class="oph-card oph-card-current">
                     <div class="oph-card-header">
-                        <i class="fa-solid fa-wave-square"></i>
+                        <i class="pi pi-volume-up"></i>
                         <span>Current harmonics</span>
                     </div>
                     <div class="oph-card-body">
                         <div
                             v-if="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex] != null && masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].current.harmonics"
                             v-for="index in masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].current.harmonics.amplitudes.length" :key="index">
-                            <WaveformInputHarmonic class="col-12 mb-1 text-start"
+                            <WaveformInputHarmonic class="col-12 mb-1 text-left"
                                 :dataTestLabel="dataTestLabel + '-Harmonic-' + (index - 1)"
                                 :index="index - 1"
                                 :title="(index - 1) == 0? 'DC' : ordinalSuffixOf(index - 1)"
@@ -310,15 +351,15 @@ export default {
                             />
                         </div>
                         <div v-if='errorMessages.current != ""' class="oph-error">
-                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <i class="pi pi-exclamation-triangle"></i>
                             <span>{{errorMessages.current}}</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="oph-card oph-card-voltage">
+                <div class="oph-card oph-card-voltage" :class="{ 'oph-disabled': isInductor }">
                     <div class="oph-card-header">
-                        <i class="fa-solid fa-bolt"></i>
+                        <i class="pi pi-bolt"></i>
                         <span>Voltage harmonics</span>
                     </div>
                     <div class="oph-card-body">
@@ -326,7 +367,7 @@ export default {
                             v-if="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex] != null && masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].voltage.harmonics"
                             v-for="index in masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].voltage.harmonics.amplitudes.length" :key="index">
 
-                            <WaveformInputHarmonic class="col-12 mb-1 text-start"
+                            <WaveformInputHarmonic class="col-12 mb-1 text-left"
                                 :dataTestLabel="dataTestLabel + '-Harmonic-' + (index - 1)"
                                 :index="index - 1"
                                 :unit="'V'"
@@ -341,7 +382,7 @@ export default {
                             />
                         </div>
                         <div v-if='errorMessages.voltage != ""' class="oph-error">
-                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <i class="pi pi-exclamation-triangle"></i>
                             <span>{{errorMessages.voltage}}</span>
                         </div>
                     </div>
@@ -352,19 +393,19 @@ export default {
                         :data-cy="dataTestLabel + '-import-button'"
                         class="oph-btn oph-btn-outline"
                         @click="$emit('clearMode')">
-                        <i class="fa-solid fa-arrow-left"></i>
+                        <i class="pi pi-arrow-left"></i>
                         <span>Go back to selecting mode</span>
                     </button>
                     <button
                         :data-cy="dataTestLabel + '-switch-to-manual-button'"
                         class="oph-btn oph-btn-primary"
                         @click="$emit('switchToManual')">
-                        <i class="fa-solid fa-wave-square"></i>
+                        <i class="pi pi-volume-up"></i>
                         <span>Switch to Waveform view</span>
                     </button>
                 </div>
             </div>
-            <div v-if="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex] != null && (masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].current.waveform != null || masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].voltage.waveform != null)" class="col-lg-7 col-md-12 row m-0 p-0 align-items-start" style="max-width: 800px;">
+            <div v-if="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex] != null && (masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].current.waveform != null || masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex].voltage.waveform != null)" class="col-12 lg:col-7 row m-0 p-0 align-items-start" style="max-width: 800px;">
                 <div>
                     <WaveformGraph class=" col-12 py-2"
                         :modelValue="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex]"
@@ -380,25 +421,25 @@ export default {
                         :maxHarmonicsToPlot="30"
                     />
 
-                    <WaveformSimpleOutput class="col-lg-12 col-md-12 m-0 px-2"
+                    <WaveformSimpleOutput class="col-12 lg:col-12 m-0 px-2"
                         v-if="!$settingsStore.operatingPointSettings.advancedMode"
                         :modelValue="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex]"
                         :dataTestLabel="dataTestLabel + '-WaveformOutput-current'"
                     />
 
                     <div v-if="$settingsStore.operatingPointSettings.advancedMode" class="row m-0 p-0">
-                        <WaveformOutput class="col-lg-6 col-md-6 col-12 m-0 px-2"
+                        <WaveformOutput class="col-12 md:col-6 lg:col-6 m-0 px-2"
                             :modelValue="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex]"
                             :dataTestLabel="dataTestLabel + '-WaveformOutput-current'"
                             :signalDescriptor="'current'"
                         />
-                        <WaveformOutput class="col-lg-6 col-md-6 col-12 m-0 px-2"
+                        <WaveformOutput class="col-12 md:col-6 lg:col-6 m-0 px-2"
                             :modelValue="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex]"
                             :dataTestLabel="dataTestLabel + '-WaveformOutput-voltage'"
                             :signalDescriptor="'voltage'"
                         />
                     </div>
-                    <WaveformCombinedOutput class="col-12 m-0 px-2 border-top"
+                    <WaveformCombinedOutput class="col-12 m-0 px-2"
                         v-if="$settingsStore.operatingPointSettings.advancedMode"
                         :dataTestLabel="dataTestLabel + '-WaveformCombinedOutput'"
                         :modelValue="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding[currentWindingIndex]"
@@ -429,7 +470,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-size: 1.05rem;
     font-weight: 700;
     letter-spacing: 0.01em;
@@ -437,28 +478,33 @@ export default {
 }
 
 .oph-title i {
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.5));
 }
 
 .oph-card {
     background:
         linear-gradient(180deg,
-            rgba(var(--bs-primary-rgb), 0.06) 0%,
-            rgba(var(--bs-primary-rgb), 0.02) 100%),
-        var(--bs-dark);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.18);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.7);
+            rgba(var(--p-primary-rgb), 0.06) 0%,
+            rgba(var(--p-primary-rgb), 0.02) 100%),
+        var(--p-dark);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.18);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.7);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 3px 10px rgba(var(--p-black-rgb), 0.3);
 }
 
 .oph-card-current {
-    border-left-color: rgba(177, 138, 234, 0.7);
+    border-left-color: rgba(var(--p-info-rgb), 0.7);
 }
 
 .oph-card-voltage {
-    border-left-color: rgba(0, 182, 255, 0.7);
+    border-left-color: rgba(var(--p-success-rgb), 0.7);
+}
+
+.oph-disabled {
+    opacity: 0.5;
+    pointer-events: none;
 }
 
 .oph-card-header {
@@ -466,9 +512,9 @@ export default {
     align-items: center;
     gap: 0.45rem;
     padding: 0.5rem 0.75rem;
-    background: rgba(var(--bs-primary-rgb), 0.08);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
-    color: var(--bs-primary);
+    background: rgba(var(--p-primary-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.12);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.78rem;
     letter-spacing: 0.04em;
@@ -476,28 +522,28 @@ export default {
 }
 
 .oph-card-current .oph-card-header {
-    color: #b18aea;
-    background: rgba(177, 138, 234, 0.1);
-    border-bottom-color: rgba(177, 138, 234, 0.18);
+    color: var(--p-info);
+    background: rgba(var(--p-info-rgb), 0.1);
+    border-bottom-color: rgba(var(--p-info-rgb), 0.18);
 }
 
 .oph-card-current .oph-card-header i {
-    filter: drop-shadow(0 0 4px rgba(177, 138, 234, 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-info-rgb), 0.5));
 }
 
 .oph-card-voltage .oph-card-header {
-    color: #00b6ff;
-    background: rgba(0, 182, 255, 0.1);
-    border-bottom-color: rgba(0, 182, 255, 0.18);
+    color: var(--p-success);
+    background: rgba(var(--p-success-rgb), 0.1);
+    border-bottom-color: rgba(var(--p-success-rgb), 0.18);
 }
 
 .oph-card-voltage .oph-card-header i {
-    filter: drop-shadow(0 0 4px rgba(0, 182, 255, 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-success-rgb), 0.5));
 }
 
 .oph-card-header i {
     font-size: 0.85rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.5));
 }
 
 .oph-card-body {
@@ -517,10 +563,10 @@ export default {
     gap: 0.4rem;
     margin-top: 0.5rem;
     padding: 0.4rem 0.6rem;
-    background: rgb(var(--bs-danger-rgb) / 0.12);
-    border: 1px solid rgb(var(--bs-danger-rgb) / 0.4);
+    background: rgb(var(--p-danger-rgb) / 0.12);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.4);
     border-radius: 8px;
-    color: var(--bs-danger);
+    color: var(--p-danger);
     font-size: 0.78rem;
     line-height: 1.3;
     white-space: pre-wrap;
@@ -556,29 +602,29 @@ button.oph-btn:hover {
 }
 
 button.oph-btn-primary {
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.85) !important;
-    background-color: var(--bs-primary) !important;
+    border: 1px solid rgba(var(--p-primary-rgb), 0.85) !important;
+    background-color: var(--p-primary) !important;
     background-image: linear-gradient(135deg,
-        rgba(var(--bs-primary-rgb), 1) 0%,
-        rgba(var(--bs-primary-rgb), 0.8) 100%) !important;
-    color: #ffffff !important;
+        rgba(var(--p-primary-rgb), 1) 0%,
+        rgba(var(--p-primary-rgb), 0.8) 100%) !important;
+    color: var(--p-white) !important;
     box-shadow:
-        0 0 0 1px rgba(var(--bs-primary-rgb), 0.3),
-        0 2px 8px rgba(var(--bs-primary-rgb), 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.3),
+        0 2px 8px rgba(var(--p-primary-rgb), 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.25);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 button.oph-btn-outline {
-    background: rgba(255, 255, 255, 0.08) !important;
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.55) !important;
-    color: var(--bs-primary) !important;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: rgba(var(--p-white-rgb), 0.08) !important;
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55) !important;
+    color: var(--p-primary) !important;
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
 }
 
 button.oph-btn-outline:hover {
-    background: rgba(var(--bs-primary-rgb), 0.2) !important;
-    border-color: rgba(var(--bs-primary-rgb), 0.85) !important;
-    color: #ffffff !important;
+    background: rgba(var(--p-primary-rgb), 0.2) !important;
+    border-color: rgba(var(--p-primary-rgb), 0.85) !important;
+    color: var(--p-white) !important;
 }
 </style>

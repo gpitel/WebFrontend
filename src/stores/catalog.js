@@ -22,11 +22,36 @@ export const useCatalogStore = defineStore("catalog", () => {
         "Losses No Proximity": 10,
     });
     const advises = ref([]);
+    // Cache key of the inputs+filters that produced the current `advises` list.
+    // CatalogAdviser sets it after a successful search and checks it on mount
+    // to skip recomputation when the user comes back from the viewer without
+    // having changed anything. Cleared anywhere `advises` is invalidated.
+    const advisesKey = ref("");
+
+    // Search-request signal. Consumers (CatalogAdviser) compare `token` against
+    // `consumed`: when token > consumed they run a fresh search and bump
+    // consumed. Both counters are persisted, so a page reload won't re-trigger
+    // a stale search. Use the `requestSearch()` action from any caller (e.g. a
+    // wizard's "Find Magnetic" handler) to ask the adviser to re-run its
+    // catalog query the next time it is mounted.
+    const searchRequestToken = ref(0);
+    const searchRequestConsumed = ref(0);
+    function requestSearch() {
+        searchRequestToken.value += 1;
+    }
+    function consumeSearchRequest() {
+        searchRequestConsumed.value = searchRequestToken.value;
+    }
 
 
     return {
         filters,
         advises,
+        advisesKey,
+        searchRequestToken,
+        searchRequestConsumed,
+        requestSearch,
+        consumeSearchRequest,
     }
 },
 {

@@ -2,13 +2,13 @@
 import { useMasStore } from '../../stores/mas'
 import { useCrossReferencerStore } from '../../stores/crossReferencer'
 import { useTaskQueueStore } from '../../stores/taskQueue'
-import { defaultCore, defaultInputs, coreCrossReferencerPossibleLabels } from '/WebSharedComponents/assets/js/defaults.js'
-import { toCamelCase, formatUnit, removeTrailingZeroes, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
+import { defaultCore, defaultInputs, coreCrossReferencerPossibleLabels } from 'WebSharedComponents/assets/js/defaults.js'
+import { toCamelCase, formatUnit, removeTrailingZeroes, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 import Module from '../../assets/js/libCrossReferencers.wasm.js'
 import CoreCrossReferencerInputs from './CoreCrossReferencer/CoreCrossReferencerInputs.vue'
 import CoreCrossReferencerTable from './CoreCrossReferencer/CoreCrossReferencerTable.vue'
-import ScatterChartComparator from '/WebSharedComponents/Common/ScatterChartComparator.vue'
+import ScatterChartComparator from 'WebSharedComponents/Common/ScatterChartComparator.vue'
 import CoreCrossReferencerOutput from './CoreCrossReferencer/CoreCrossReferencerOutput.vue'
 </script>
 
@@ -278,25 +278,25 @@ export default {
 <template>
     <div class="container">
         <div class="row">
-            <h1 v-if="!keepMaterialConstant" class="col-lg-12 text-center text-white">Fair-Rite Core Cross Referencer</h1>
-            <h1 v-else class="col-lg-12 text-center text-white">Fair-Rite Core Shape Cross Referencer</h1>
+            <h1 v-if="!keepMaterialConstant" class="lg:col-12 text-center text-white">Fair-Rite Core Cross Referencer</h1>
+            <h1 v-else class="lg:col-12 text-center text-white">Fair-Rite Core Shape Cross Referencer</h1>
         </div>
         <div class="row">
-            <h6 class="col-lg-12 text-center text-white">Powered by OpenMagnetics</h6>
+            <h6 class="lg:col-12 text-center text-white">Powered by OpenMagnetics</h6>
         </div>
         <div class="row">
-            <div class="col-lg-3 text-center text-white bg-dark m-0 p-0">
-                <label class="rounded-2 fs-5 col-12 mb-1 text-success"> 1<sup>st</sup> Step: What is your Current Core?</label>
+            <div class="lg:col-3 text-center text-white bg-dark m-0 p-0">
+                <label class="rounded-2 text-xl col-12 mb-1 text-success"> 1<sup>st</sup> Step: What is your Current Core?</label>
             </div>
-            <div class="col-lg-6 text-center text-white m-0 p-0">
-                <label class="rounded-2 fs-5 col-12 mb-1 text-success"> 2<sup>nd</sup> Step: Select an Alternative</label>
+            <div class="lg:col-6 text-center text-white m-0 p-0">
+                <label class="rounded-2 text-xl col-12 mb-1 text-success"> 2<sup>nd</sup> Step: Select an Alternative</label>
             </div>
-            <div class="col-lg-3 text-center text-white m-0 p-0">
-                <label class="rounded-2 fs-5 col-12 mb-1 text-success"> 3<sup>rd</sup> Step: Analyze your Alternative</label>
+            <div class="lg:col-3 text-center text-white m-0 p-0">
+                <label class="rounded-2 text-xl col-12 mb-1 text-success"> 3<sup>rd</sup> Step: Analyze your Alternative</label>
             </div>
         </div>
         <div class="row">
-            <div class="col-lg-3 text-center text-white bg-dark p-3">
+            <div class="lg:col-3 text-center text-white bg-dark p-3">
                 {{(keepMaterialConstant)? onlyManufacturer : ''}}
                 <CoreCrossReferencerInputs 
                 @inputsUpdated="inputsUpdated"
@@ -307,21 +307,21 @@ export default {
                 <label :data-cy="dataTestLabel + '-ErrorMessage'" class="text-danger m-0" style="font-size: 0.9em"> {{errorMessage}}</label>
                 <div class="container">
                     <div class="row">
-                        <button :disabled="loading" :data-cy="dataTestLabel + '-changeTool'" @click="onCoreMaterialCrossReferencer" class="btn btn-secondary mb-2">I want to cross-reference just the material instead, keeping the shape constant</button>
+                        <button :disabled="loading" :data-cy="dataTestLabel + '-changeTool'" @click="onCoreMaterialCrossReferencer" class="p-button p-button-secondary mb-2">I want to cross-reference just the material instead, keeping the shape constant</button>
                     </div>
                 </div>
                 <div v-if="keepMaterialConstant" class="container">
                     <div class="row">
-                        <button :disabled="loading" :data-cy="dataTestLabel + '-changeTool'" @click="onCoreMaterialCrossReferencer" class="btn btn-secondary">I want to cross-reference the full core instead</button>
+                        <button :disabled="loading" :data-cy="dataTestLabel + '-changeTool'" @click="onCoreMaterialCrossReferencer" class="p-button p-button-secondary">I want to cross-reference the full core instead</button>
                     </div>
                 </div>
                 <div v-if="!keepMaterialConstant" class="container">
                     <div class="row">
-                        <button :disabled="loading" :data-cy="dataTestLabel + '-changeTool'" @click="onCoreShapeCrossReferencer" class="btn btn-secondary">I want to cross-reference just the shape instead, keeping the material constant</button>
+                        <button :disabled="loading" :data-cy="dataTestLabel + '-changeTool'" @click="onCoreShapeCrossReferencer" class="p-button p-button-secondary">I want to cross-reference just the shape instead, keeping the material constant</button>
                     </div>
                 </div>
             </div>
-            <div class="col-lg-6 text-center text-white">
+            <div class="lg:col-6 text-center text-white">
                 <div class="row" v-if="hideOutputs" >
                     <img data-cy="CoreAdviser-loading" class="mx-auto d-block col-12" alt="loading" style="width: 50%; height: auto;" :src="loadingGif">
                 </div>
@@ -341,7 +341,7 @@ export default {
                      />
 
                     <ElementFromList
-                        class="col-6 my-3 text-start"
+                        class="col-6 my-3 text-left"
                         :dataTestLabel="dataTestLabel + '-XLabelSelector'"
                         :name="'xLabel'"
                         :titleSameRow="true"
@@ -352,7 +352,7 @@ export default {
                     />
 
                     <ElementFromList
-                        class="col-6 my-3 text-start"
+                        class="col-6 my-3 text-left"
                         :dataTestLabel="dataTestLabel + '-YLabelSelector'"
                         :name="'yLabel'"
                         :titleSameRow="true"
@@ -372,7 +372,7 @@ export default {
 
                 </div>
             </div>
-            <div v-if="!hideOutputs" class="col-lg-3 text-center text-white" style="height: 45vh">
+            <div v-if="!hideOutputs" class="lg:col-3 text-center text-white" style="height: 45vh">
                 <CoreCrossReferencerOutput
                     v-if="crossReferencerStore.selectedCoreIndex != -1"
                     :dataTestLabel="`${dataTestLabel}-CoreCrossReferencerFinalizer`"
@@ -383,7 +383,7 @@ export default {
                     Select a core to view details, either by clicking on the graph point or in the name in the table
                 </h2>
             </div>
-            <div v-else class="col-lg-3">
+            <div v-else class="lg:col-3">
                 <img data-cy="CoreAdviser-loading" class="mx-auto d-block col-12" alt="loading" style="width: 50%; height: auto;" :src="loadingGif">
             </div>
         </div>

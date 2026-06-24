@@ -1,7 +1,7 @@
 <script setup>
 import { useCatalogStore } from '../../stores/catalog'
 import { useMasStore } from '../../stores/mas'
-import { toDashCase, toPascalCase, toTitleCase } from '/WebSharedComponents/assets/js/utils.js'
+import { toDashCase, toPascalCase, toTitleCase } from 'WebSharedComponents/assets/js/utils.js'
 import MagneticBuilderSettings from './Settings/MagneticBuilderSettings.vue'
 import AdviserSettings from './Settings/AdviserSettings.vue'
 import CatalogSettings from './Settings/CatalogSettings.vue'
@@ -24,27 +24,13 @@ export default {
         return {
             catalogStore,
             masStore,
+            settingsVisible: false,
         }
-    },
-    computed: {
-        modalTarget() {
-            if ((this.$stateStore.getCurrentToolState().subsection == 'magneticAdviser' || this.$stateStore.getCurrentToolState().subsection == 'magneticCoreAdviser')) {
-                return '#AdviserSettingsModal'
-            }
-            else if (this.$stateStore.getCurrentToolState().subsection == 'magneticBuilder') {
-                return '#MagneticBuilderSettingsModal'
-            }
-            else if (this.$stateStore.selectedWorkflow == 'catalog') {
-                return '#CatalogAdviserSettingsModal'
-            }
-            else if (this.$stateStore.getCurrentToolState().subsection == 'operatingPoints') {
-                return '#OperatingPointSettingsModal'
-            }
-        },
     },
     watch: {
     },
     methods: {
+        openSettings() { this.settingsVisible = true },
         onAdviserSettingsUpdated() {
         },
         async onCatalogSettingsUpdated() {
@@ -83,7 +69,7 @@ export default {
     >
         <div class="toolmenu-header">
             <div class="toolmenu-header-left">
-                <i class="fa-solid fa-toolbox"></i>
+                <i class="pi pi-briefcase"></i>
                 <span>Tool menu</span>
             </div>
         </div>
@@ -91,22 +77,26 @@ export default {
         <div class="toolmenu-body">
             <MagneticBuilderSettings
                 v-if="$stateStore.getCurrentToolState().subsection == 'magneticBuilder'"
+                v-model:visible="settingsVisible"
                 :dataTestLabel="dataTestLabel"
                 :modalName="'MagneticBuilderSettingsModal'"
                 @onSettingsUpdated="onMagneticBuilderSettingsUpdated"
             />
             <AdviserSettings
                 v-if="($stateStore.getCurrentToolState().subsection == 'magneticAdviser' || $stateStore.getCurrentToolState().subsection == 'magneticCoreAdviser')"
+                v-model:visible="settingsVisible"
                 :modalName="'AdviserSettingsModal'"
                 @onSettingsUpdated="onAdviserSettingsUpdated"
             />
             <CatalogSettings
                 v-if="$stateStore.selectedWorkflow == 'catalog'"
+                v-model:visible="settingsVisible"
                 :modalName="'CatalogAdviserSettingsModal'"
                 @onSettingsUpdated="onCatalogSettingsUpdated"
             />
             <OperatingPointSettings
                 v-if="$stateStore.getCurrentToolState().subsection == 'operatingPoints'"
+                v-model:visible="settingsVisible"
                 :modalName="'OperatingPointSettingsModal'"
                 @onSettingsUpdated="onOperatingPointSettingsUpdated"
             />
@@ -116,10 +106,9 @@ export default {
                     v-if="($stateStore.getCurrentToolState().subsection == 'magneticAdviser' || $stateStore.getCurrentToolState().subsection == 'magneticCoreAdviser') || $stateStore.selectedWorkflow == 'catalog' || $stateStore.getCurrentToolState().subsection == 'operatingPoints' || $stateStore.getCurrentToolState().subsection == 'magneticBuilder'"
                     :data-cy="dataTestLabel + 'settings-modal-button'"
                     class="toolmenu-btn toolmenu-btn-ghost"
-                    data-bs-toggle="modal"
-                    :data-bs-target="modalTarget"
+                    @click="openSettings"
                 >
-                    <i class="fa-solid fa-gear"></i>
+                    <i class="pi pi-cog"></i>
                     <span>Settings</span>
                 </button>
                 <button
@@ -128,7 +117,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-outline"
                     @click="$stateStore.redraw()"
                 >
-                    <i class="fa-solid fa-pen-ruler"></i>
+                    <i class="pi pi-pencil"></i>
                     <span>Redraw</span>
                 </button>
                 <button
@@ -137,7 +126,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-outline"
                     @click="$stateStore.resimulate()"
                 >
-                    <i class="fa-solid fa-rotate"></i>
+                    <i class="pi pi-refresh"></i>
                     <span>Resimulate</span>
                 </button>
                 <button
@@ -146,7 +135,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-primary"
                     @click="$emit('editMagnetic')"
                 >
-                    <i class="fa-solid fa-pen-to-square"></i>
+                    <i class="pi pi-pencil"></i>
                     <span>Edit</span>
                 </button>
                 <button
@@ -155,7 +144,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-primary"
                     @click="$emit('viewMagnetic')"
                 >
-                    <i class="fa-solid fa-check"></i>
+                    <i class="pi pi-check"></i>
                     <span>Confirm</span>
                 </button>
                 <button
@@ -164,7 +153,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-primary"
                     @click="catalogStore.orderSample(masStore.mas)"
                 >
-                    <i class="fa-solid fa-cart-shopping"></i>
+                    <i class="pi pi-shopping-cart"></i>
                     <span>Order a sample</span>
                 </button>
                 <button
@@ -173,7 +162,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-secondary"
                     @click="$emit('toolSelected', 'magneticAdviser')"
                 >
-                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <i class="pi pi-sparkles"></i>
                     <span>Magnetic Adviser</span>
                 </button>
                 <button
@@ -205,7 +194,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-primary"
                     @click="coreAdvancedModeConfirmChanges"
                 >
-                    <i class="fa-solid fa-check"></i>
+                    <i class="pi pi-check"></i>
                     <span>Apply changes</span>
                 </button>
                 <button
@@ -213,7 +202,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-danger"
                     @click="coreAdvancedModeCancelChanges"
                 >
-                    <i class="fa-solid fa-xmark"></i>
+                    <i class="pi pi-times"></i>
                     <span>Cancel</span>
                 </button>
                 <button
@@ -221,7 +210,7 @@ export default {
                     class="toolmenu-btn toolmenu-btn-danger"
                     @click="coilAdvancedModeClose"
                 >
-                    <i class="fa-solid fa-xmark"></i>
+                    <i class="pi pi-times"></i>
                     <span>Close</span>
                 </button>
             </div>
@@ -231,13 +220,13 @@ export default {
 
 <style scoped>
 .toolmenu-panel {
-    background: rgba(var(--bs-dark-rgb), 0.55);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.08);
-    border-top: 3px solid rgba(var(--bs-primary-rgb), 0.8);
+    background: rgba(var(--p-dark-rgb), 0.55);
+    border: 1px solid rgba(var(--p-white-rgb), 0.08);
+    border-top: 3px solid rgba(var(--p-primary-rgb), 0.8);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.5rem 0;
-    box-shadow: 0 6px 24px rgba(var(--bs-dark-rgb), 0.45), inset 0 1px 0 rgba(var(--bs-light-rgb), 0.04);
+    box-shadow: 0 6px 24px rgba(var(--p-dark-rgb), 0.45), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -246,11 +235,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(255, 255, 255, 0.04);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(var(--p-white-rgb), 0.04);
+    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.08);
     font-weight: 600;
     font-size: 0.9rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -262,7 +251,7 @@ export default {
 
 .toolmenu-header-left i {
     font-size: 0.95rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.45));
 }
 
 .toolmenu-body {
@@ -302,69 +291,69 @@ export default {
 
 .toolmenu-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .toolmenu-btn-secondary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-success) 115%, transparent 0%) 0%,
-        var(--bs-success) 55%,
-        rgb(var(--bs-success-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-success) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
+        var(--p-success) 55%,
+        rgb(var(--p-success-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-success-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-success-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-success-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-success-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .toolmenu-btn-danger {
-    background: rgb(var(--bs-danger-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-danger-rgb) / 0.55);
-    color: var(--bs-danger);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: rgb(var(--p-danger-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.55);
+    color: var(--p-danger);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
 }
 
 .toolmenu-btn-danger:hover:not(:disabled) {
-    background: rgb(var(--bs-danger-rgb) / 0.3);
-    border-color: rgb(var(--bs-danger-rgb) / 0.75);
-    box-shadow: 0 2px 6px rgb(var(--bs-danger-rgb) / 0.25);
+    background: rgb(var(--p-danger-rgb) / 0.3);
+    border-color: rgb(var(--p-danger-rgb) / 0.75);
+    box-shadow: 0 2px 6px rgb(var(--p-danger-rgb) / 0.25);
 }
 
 .toolmenu-btn-outline {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    color: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.25);
+    color: rgba(var(--p-white-rgb), 0.9);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.2);
 }
 
 .toolmenu-btn-outline:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.45);
-    color: var(--bs-white);
+    background: rgba(var(--p-white-rgb), 0.15);
+    border-color: rgba(var(--p-white-rgb), 0.45);
+    color: var(--p-white);
 }
 
 .toolmenu-btn-ghost {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(var(--p-white-rgb), 0.15);
+    color: rgba(var(--p-white-rgb), 0.75);
     box-shadow: none;
 }
 
 .toolmenu-btn-ghost:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 0.95);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border-color: rgba(var(--p-white-rgb), 0.3);
+    color: rgba(var(--p-white-rgb), 0.95);
 }
 </style>
 

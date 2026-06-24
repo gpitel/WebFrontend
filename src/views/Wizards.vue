@@ -6,6 +6,7 @@ import CmcWizard from '../components/Wizards/CmcWizard.vue'
 import DmcWizard from '../components/Wizards/DmcWizard.vue'
 import FlybackWizard from '../components/Wizards/FlybackWizard.vue'
 import BuckBoostWizard from '../components/Wizards/BuckBoostWizard.vue'
+import SepicWizard from '../components/Wizards/SepicWizard.vue'
 import IsolatedBuckBoostWizard from '../components/Wizards/IsolatedBuckBoostWizard.vue'
 import PushPullWizard from '../components/Wizards/PushPullWizard.vue'
 import ForwardWizard from '../components/Wizards/ForwardWizard.vue'
@@ -14,6 +15,16 @@ import DabWizard from '../components/Wizards/DabWizard.vue'
 import LlcWizard from '../components/Wizards/LlcWizard.vue'
 import CllcWizard from '../components/Wizards/CllcWizard.vue'
 import PsfbWizard from '../components/Wizards/PsfbWizard.vue'
+import PshbWizard from '../components/Wizards/PshbWizard.vue'
+import AhbWizard from '../components/Wizards/AhbWizard.vue'
+import CukWizard from '../components/Wizards/CukWizard.vue'
+import ZetaWizard from '../components/Wizards/ZetaWizard.vue'
+import FourSwitchBuckBoostWizard from '../components/Wizards/FourSwitchBuckBoostWizard.vue'
+import WeinbergWizard from '../components/Wizards/WeinbergWizard.vue'
+import ClllcWizard from '../components/Wizards/ClllcWizard.vue'
+import SrcWizard from '../components/Wizards/SrcWizard.vue'
+import ViennaWizard from '../components/Wizards/ViennaWizard.vue'
+import CurrentTransformerWizard from '../components/Wizards/CurrentTransformerWizard.vue'
 
 </script>
 
@@ -51,6 +62,10 @@ export default {
                 v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Boost"
                 :converterName="'Boost'"
                 :dataTestLabel="'BoostWizard'"
+            />
+            <SepicWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Sepic"
+                :dataTestLabel="'SepicWizard'"
             />
             <IsolatedBuckBoostWizard
                 v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.IsolatedBuck"
@@ -101,6 +116,46 @@ export default {
             <PsfbWizard
                 v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.PhaseShiftFullBridge"
                 :dataTestLabel="'PsfbWizard'"
+            />
+            <PshbWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.PhaseShiftHalfBridge"
+                :dataTestLabel="'PshbWizard'"
+            />
+            <AhbWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.AsymmetricHalfBridge"
+                :dataTestLabel="'AhbWizard'"
+            />
+            <CukWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Cuk"
+                :dataTestLabel="'CukWizard'"
+            />
+            <ZetaWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Zeta"
+                :dataTestLabel="'ZetaWizard'"
+            />
+            <FourSwitchBuckBoostWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.FourSwitchBuckBoost"
+                :dataTestLabel="'FourSwitchBuckBoostWizard'"
+            />
+            <WeinbergWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Weinberg"
+                :dataTestLabel="'WeinbergWizard'"
+            />
+            <ClllcWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Clllc"
+                :dataTestLabel="'ClllcWizard'"
+            />
+            <SrcWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.SeriesResonant"
+                :dataTestLabel="'SrcWizard'"
+            />
+            <ViennaWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.Vienna"
+                :dataTestLabel="'ViennaWizard'"
+            />
+            <CurrentTransformerWizard
+                v-if="$stateStore.getCurrentWizard() == $stateStore.Wizards.CurrentTransformer"
+                :dataTestLabel="'CurrentTransformerWizard'"
             />
         </main>
         <Footer class="mt-auto"/>

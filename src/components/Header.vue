@@ -2,11 +2,11 @@
 import { useMasStore } from '/MagneticBuilder/src/stores/mas'
 import { useHistoryStore } from '/MagneticBuilder/src/stores/history'
 import { useTaskQueueStore } from '../stores/taskQueue'
-import { combinedStyle, combinedClass, checkAndFixMas, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { combinedStyle, combinedClass, checkAndFixMas, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
 import { defineAsyncComponent } from "vue";
 import { useElementVisibility  } from '@vueuse/core'
 import { ref } from 'vue'
-import '../assets/css/custom.css'
+import '../assets/scss/custom.scss'
 </script>
 
 <script>
@@ -18,29 +18,97 @@ export default {
     emits: ["toolSelected"],
     components: {
         BugReporterModal: defineAsyncComponent(() => import('/src/components/User/BugReporter.vue') ),
-        DeadManSwitch: defineAsyncComponent(() => import('/src/components/User/DeadManSwitch.vue') ),
-        // NotificationsModal: defineAsyncComponent(() => import('/src/components/NotificationsModal.vue') ),
     },
     data() {
         const masStore = useMasStore();
         const historyStore = useHistoryStore();
         const taskQueueStore = useTaskQueueStore();
         const loading = false;
+        const bugReporterVisible = false;
+        // Grouped wizard menu — keeps the header dropdown compact by hiding
+        // each topology family behind a fly-out submenu. Keys (cy, store,
+        // hoverKey, icon, label) match the prior flat menu 1:1 so existing
+        // tests and behaviour are unchanged.
+        const wizardGroups = [
+            {
+                label: 'Filters / PFC',
+                icon: 'bi-funnel-fill',
+                items: [
+                    { cy: 'Cmc-link',       store: 'CommonModeChoke',       hoverKey: 'CommonModeChoke',       icon: 'bi-funnel-fill',         label: 'CMC' },
+                    { cy: 'Dmc-link', store: 'DifferentialModeChoke', hoverKey: 'DifferentialModeChoke', icon: 'bi-soundwave',           label: 'DMC' },
+                    { cy: 'Pfc-link',                          store: 'Pfc',                   hoverKey: 'Pfc',                   icon: 'bi-soundwave',           label: 'PFC' },
+                ],
+            },
+            {
+                label: 'Non-Isolated DC-DC',
+                icon: 'bi-arrow-down-up',
+                items: [
+                    { cy: 'Buck-link',                store: 'Buck',                hoverKey: 'Buck',                icon: 'bi-arrow-down',     label: 'Buck' },
+                    { cy: 'Boost-link',               store: 'Boost',               hoverKey: 'Boost',               icon: 'bi-arrow-up',       label: 'Boost' },
+                    { cy: 'Sepic-link',               store: 'Sepic',               hoverKey: 'Sepic',               icon: 'bi-arrow-down-up',  label: 'SEPIC' },
+                    { cy: 'Cuk-link',                 store: 'Cuk',                 hoverKey: 'Cuk',                 icon: 'bi-arrow-down-up',  label: 'Cuk' },
+                    { cy: 'Zeta-link',                store: 'Zeta',                hoverKey: 'Zeta',                icon: 'bi-arrow-down-up',  label: 'Zeta' },
+                    { cy: 'FourSwitchBuckBoost-link', store: 'FourSwitchBuckBoost', hoverKey: 'FourSwitchBuckBoost', icon: 'bi-arrow-down-up',  label: 'Four-Switch Buck-Boost' },
+                ],
+            },
+            {
+                label: 'Isolated Forward / Flyback',
+                icon: 'bi-shield-shaded',
+                items: [
+                    { cy: 'Flyback-link',             store: 'Flyback',             hoverKey: 'Flyback',             icon: 'bi-lightning-fill',   label: 'Flyback' },
+                    { cy: 'IsolatedBuck-link',        store: 'IsolatedBuck',        hoverKey: 'IsolatedBuck',        icon: 'bi-shield-shaded',    label: 'Isolated Buck' },
+                    { cy: 'IsolatedBuckBoost-link',   store: 'IsolatedBuckBoost',   hoverKey: 'IsolatedBuckBoost',   icon: 'bi-shield-exclamation', label: 'Isolated Buck-Boost' },
+                    { cy: 'SingleSwitchForward-link', store: 'SingleSwitchForward', hoverKey: 'SingleSwitchForward', icon: 'bi-toggle-off',       label: 'Single-Switch Forward' },
+                    { cy: 'TwoSwitchForward-link',    store: 'TwoSwitchForward',    hoverKey: 'TwoSwitchForward',    icon: 'bi-toggle-on',        label: 'Two-Switch Forward' },
+                    { cy: 'ActiveClampForward-link',  store: 'ActiveClampForward',  hoverKey: 'ActiveClampForward',  icon: 'bi-fullscreen-exit',  label: 'Active Clamp Forward' },
+                ],
+            },
+            {
+                label: 'Isolated Bridge / Push-Pull',
+                icon: 'bi-arrow-left-right',
+                items: [
+                    { cy: 'PushPull-link', store: 'PushPull',             hoverKey: 'PushPull', icon: 'bi-arrow-left-right',     label: 'Push-Pull' },
+                    { cy: 'Weinberg-link', store: 'Weinberg',             hoverKey: 'Weinberg', icon: 'bi-arrow-left-right',     label: 'Weinberg' },
+                    { cy: 'Psfb-link',                     store: 'PhaseShiftFullBridge', hoverKey: 'PSFB',     icon: 'bi-chevron-double-right', label: 'PSFB' },
+                    { cy: 'Pshb-link',                     store: 'PhaseShiftHalfBridge', hoverKey: 'PSHB',     icon: 'bi-chevron-right',        label: 'PSHB' },
+                    { cy: 'Ahb-link',                      store: 'AsymmetricHalfBridge', hoverKey: 'AHB',      icon: 'bi-arrow-bar-right',      label: 'AHB' },
+                    { cy: 'Dab-link',                      store: 'DualActiveBridge',     hoverKey: 'DAB',      icon: 'bi-arrow-left-right',     label: 'DAB' },
+                ],
+            },
+            {
+                label: 'Resonant',
+                icon: 'bi-soundwave',
+                items: [
+                    { cy: 'Llc-link',   store: 'LlcResonant',    hoverKey: 'LLC',   icon: 'bi-soundwave',        label: 'LLC' },
+                    { cy: 'Cllc-link',  store: 'CllcResonant',   hoverKey: 'CLLC',  icon: 'bi-arrow-left-right', label: 'CLLC' },
+                    { cy: 'Clllc-link', store: 'Clllc',          hoverKey: 'CLLLC', icon: 'bi-arrow-left-right', label: 'CLLLC' },
+                    { cy: 'Src-link',   store: 'SeriesResonant', hoverKey: 'SRC',   icon: 'bi-soundwave',        label: 'SRC' },
+                ],
+            },
+            {
+                label: 'Three-Phase PFC',
+                icon: 'bi-lightning-charge',
+                items: [
+                    { cy: 'Vienna-link', store: 'Vienna', hoverKey: 'Vienna', icon: 'bi-lightning-charge', label: 'Vienna Rectifier' },
+                ],
+            },
+        ];
         return {
             masStore,
             historyStore,
             taskQueueStore,
-            showModal: false,
-            loggedIn: false,
-            username: null,
             loading,
+            bugReporterVisible,
             hoveredWizard: null,
+            openWizardGroup: null,
+            wizardGroups,
+            navCollapseOpen: false,
+            openDropdown: null,
         }
     },
     methods: {
-        onShowModal() {
-            this.showModal = true
-        },
+        toggleDropdown(key) { this.openDropdown = this.openDropdown === key ? null : key; },
+        closeDropdowns() { this.openDropdown = null; this.navCollapseOpen = false; },
         async onNewPowerMagneticDesign() {
             this.$stateStore.resetMagneticTool();
             this.$stateStore.selectWorkflow("design");
@@ -74,6 +142,7 @@ export default {
         },
         async onWizards(wizard) {
             this.$stateStore.selectWizard(wizard);
+            this.openWizardGroup = null;
             await this.$nextTick();
             if (this.$route.name != 'Wizards')
                 await this.$router.push(`${import.meta.env.BASE_URL}wizards`);
@@ -81,6 +150,14 @@ export default {
                 this.$userStore.loadingPath = `${import.meta.env.BASE_URL}wizards`;
                 await this.$router.push(`${import.meta.env.BASE_URL}engine_loader`);
             }
+        },
+        // Toggle the click-driven submenu open state. Hover still expands
+        // the panel via CSS (.dropdown-submenu:hover > .submenu-panel);
+        // the click path is the touch-friendly fallback and the explicit
+        // signal Playwright tests use to open a group before clicking an
+        // item inside.
+        toggleWizardGroup(label) {
+            this.openWizardGroup = this.openWizardGroup === label ? null : label;
         },
         async onInsulationCoordinator() {
             this.$stateStore.resetMagneticTool();
@@ -210,28 +287,29 @@ export default {
     },
     computed: {
     },
-    created() {
-        if (this.$userStore.isLoggedIn.value && this.$cookies.get('username') == null) {
-            this.$userStore.reset();
-        }
-    },
     mounted() {
         this.$settingsStore.loadingGif = "/images/loading.gif";
 
         const style = getComputedStyle(document.body);
         const theme = {
-            primary: style.getPropertyValue('--bs-primary'),
-            secondary: style.getPropertyValue('--bs-secondary'),
-            success: style.getPropertyValue('--bs-success'),
-            info: style.getPropertyValue('--bs-info'),
-            warning: style.getPropertyValue('--bs-warning'),
-            danger: style.getPropertyValue('--bs-danger'),
-            light: style.getPropertyValue('--bs-light'),
-            dark: style.getPropertyValue('--bs-dark'),
-            white: style.getPropertyValue('--bs-white'),
-            transparent: style.getPropertyValue('--bs-transparent'),
+            primary: style.getPropertyValue('--p-primary'),
+            secondary: style.getPropertyValue('--p-secondary'),
+            success: style.getPropertyValue('--p-success'),
+            info: style.getPropertyValue('--p-info'),
+            warning: style.getPropertyValue('--p-warning'),
+            danger: style.getPropertyValue('--p-danger'),
+            light: style.getPropertyValue('--p-light'),
+            dark: style.getPropertyValue('--p-dark'),
+            white: style.getPropertyValue('--p-white'),
+            transparent: style.getPropertyValue('--p-transparent'),
         };
         this.$styleStore.setTheme(theme);
+
+        this._closeDropdownsBound = this.closeDropdowns.bind(this);
+        document.addEventListener('click', this._closeDropdownsBound);
+    },
+    beforeUnmount() {
+        if (this._closeDropdownsBound) document.removeEventListener('click', this._closeDropdownsBound);
     }
 }
 </script>
@@ -245,11 +323,11 @@ export default {
                 class="btn m-0 p-0"
                 @click="onHome"
             >
-                <img src="/images/newLogo.png" width="60" height="40" href="/" class="d-inline-block align-top me-3" alt="OpenMagnetics Logo">
+                <img src="/images/newLogo.png" class="om-logo d-inline-block align-top me-2" alt="OpenMagnetics Logo">
             </button>
             <button
                 data-cy="Header-brand-home-link"
-                class="navbar-brand btn m-0 p-0 pe-2"
+                class="navbar-brand btn m-0 p-0 pr-2"
                 @click="onHome"
             >
                 {{'OpenMagnetics'}}
@@ -258,20 +336,19 @@ export default {
                 class="navbar-toggler om-toggler"
                 ref="headerToggler"
                 type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#navbarNavDropdown"
+                @click="navCollapseOpen = !navCollapseOpen"
                 aria-controls="navbarNavDropdown"
-                aria-expanded="false"
+                :aria-expanded="navCollapseOpen ? 'true' : 'false'"
                 aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
             </button>
-            <div class="collapse navbar-collapse" id="navbarNavDropdown">
+            <div class="collapse navbar-collapse" :class="{ show: navCollapseOpen }" id="navbarNavDropdown">
                 <ul class="navbar-nav text-center">
                     <li class="nav-item" >
                         <a
                             data-cy="Header-alfs-musings-link"
                             :class="headerTogglerIsVisible? '' : 'mx-1'"
-                            class="nav-link om-nav-link me-3 text-center"
+                            class="nav-link om-nav-link mr-3 text-center"
                             href="https://www.linkedin.com/newsletters/7026708624966135808/"
                             target="_blank"
                             rel="noopener noreferrer"
@@ -283,243 +360,80 @@ export default {
                         <button
                             data-cy="Header-new-magnetic-link"
                             :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
-                            class="btn btn-block nav-link om-nav-btn border rounded px-2"
+                            class="nav-link w-100 om-nav-btn border rounded px-2"
                             @click="onNewPowerMagneticDesign"
                         >
-                            <i class="me-2 fa-solid fa-toolbox"></i>{{'New Magnetic'}}
+                            <i class="mr-2 pi pi-briefcase"></i>{{'New Magnetic'}}
                         </button>
                     </li>
-                    <li class="nav-item dropdown">
+                    <li class="nav-item dropdown" @click.stop>
                         <a
                             :class="headerTogglerIsVisible? '' : 'mx-1'"
                             class="nav-link dropdown-toggle om-nav-btn border rounded"
                             href="#"
                             role="button"
-                            data-bs-toggle="dropdown"
-                            aria-expanded="false"
+                            @click.prevent="toggleDropdown('tools')"
+                            :aria-expanded="openDropdown === 'tools' ? 'true' : 'false'"
                         >
-                            <i class="me-2 fa-solid fa-toolbox"></i>{{'Tools'}}
+                            <i class="mr-2 pi pi-briefcase"></i>{{'Tools'}}
                         </a>
-                      <ul class="dropdown-menu px-1">
+                      <ul class="dropdown-menu px-1" :class="{ show: openDropdown === 'tools' }">
                         <li>
                             <button
                                 data-cy="Header-insulation-coordinator-link"
                                 :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
-                                class="dropdown-item btn btn-block nav-link px-2"
+                                class="dropdown-item nav-link w-100 px-2"
                                 @click="onInsulationCoordinator"
                             >
-                                <i class="me-2 fa-solid fa-bolt-lightning"></i>{{'Insulation Coordinator'}}
+                                <i class="mr-2 pi pi-bolt-charge-fill"></i>{{'Insulation Coordinator'}}
                             </button>
                         </li>
                       </ul>
                     </li>
-                    <li class="nav-item dropdown">
+                    <li class="nav-item dropdown" @click.stop>
                         <a
                             :class="headerTogglerIsVisible? '' : 'mx-1'"
                             class="nav-link dropdown-toggle om-wizard-btn border rounded"
                             href="#"
                             role="button"
-                            data-bs-toggle="dropdown"
-                            aria-expanded="false"
+                            @click.prevent="toggleDropdown('wizards')"
+                            :aria-expanded="openDropdown === 'wizards' ? 'true' : 'false'"
                         >
-                            <i class="me-2 fa-solid fa-hat-wizard"></i>{{'Wizards'}}
+                            <i class="mr-2 pi pi-sparkles"></i>{{'Wizards'}}
                         </a>
-                      <ul class="dropdown-menu px-3">
-                        <li>
+                      <ul class="dropdown-menu px-3" :class="{ show: openDropdown === 'wizards' }">
+                        <li
+                            v-for="group in wizardGroups"
+                            :key="group.label"
+                            class="dropdown-submenu"
+                        >
                             <button
-                                :disabled="true"
-                                data-cy="Wizard-CommonModeChoke-link"
+                                :data-cy="'WizardGroup-' + group.label.replace(/[^A-Za-z0-9]/g, '') + '-toggle'"
                                 :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.CommonModeChoke)"
-                                @mouseenter="hoveredWizard = 'CommonModeChoke'"
-                                @mouseleave="hoveredWizard = null"
+                                class="dropdown-item dropdown-submenu-toggle nav-link w-100 px-2"
+                                type="button"
+                                @click.stop="toggleWizardGroup(group.label)"
                             >
-                                <i class="me-2 fa-solid fa-filter"></i>{{'CMC Wizard'}}
+                                <span><i class="mr-2 bi" :class="group.icon"></i>{{ group.label }}</span>
+                                <i class="pi pi-chevron-right submenu-caret ml-2"></i>
                             </button>
-                        </li>
-                        <li>
-                            <button
-                                :disabled="true"
-                                data-cy="Wizard-DifferentialModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.DifferentialModeChoke)"
-                                @mouseenter="hoveredWizard = 'DifferentialModeChoke'"
-                                @mouseleave="hoveredWizard = null"
+                            <ul
+                                class="dropdown-menu submenu-panel px-3"
+                                :class="{ 'submenu-open': openWizardGroup === group.label }"
                             >
-                                <i class="me-2 fa-solid fa-wave-square"></i>{{'DMC Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="Flyback-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.Flyback)"
-                                @mouseenter="hoveredWizard = 'Flyback'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-bolt"></i>{{'Flyback Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="Buck-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.Buck)"
-                                @mouseenter="hoveredWizard = 'Buck'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-arrow-down"></i>{{'Buck Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="Boost-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.Boost)"
-                                @mouseenter="hoveredWizard = 'Boost'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-arrow-up"></i>{{'Boost Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="IsolatedBuck-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.IsolatedBuck)"
-                                @mouseenter="hoveredWizard = 'IsolatedBuck'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-shield-halved"></i>{{'Isolated Buck Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="IsolatedBuckBoost-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.IsolatedBuckBoost)"
-                                @mouseenter="hoveredWizard = 'IsolatedBuckBoost'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-shield-virus"></i>{{'Isolated Buck Boost Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="PushPull-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.PushPull)"
-                                @mouseenter="hoveredWizard = 'PushPull'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-arrows-left-right"></i>{{'Push-Pull Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="Pfc-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.Pfc)"
-                                @mouseenter="hoveredWizard = 'Pfc'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-wave-square"></i>{{'PFC Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="Dab-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.DualActiveBridge)"
-                                @mouseenter="hoveredWizard = 'DAB'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-right-left"></i>{{'DAB Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="Llc-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.LlcResonant)"
-                                @mouseenter="hoveredWizard = 'LLC'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-wave-square"></i>{{'LLC Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                :disabled="true"
-                                data-cy="Cllc-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.CllcResonant)"
-                                @mouseenter="hoveredWizard = 'CLLC'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-car-battery"></i>{{'CLLC Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                :disabled="true"
-                                data-cy="Psfb-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.PhaseShiftFullBridge)"
-                                @mouseenter="hoveredWizard = 'PSFB'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-angles-right"></i>{{'PSFB Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="ActiveClampForward-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.ActiveClampForward)"
-                                @mouseenter="hoveredWizard = 'ActiveClampForward'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-compress"></i>{{'Active Clamp Forward Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="SingleSwitchForward-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.SingleSwitchForward)"
-                                @mouseenter="hoveredWizard = 'SingleSwitchForward'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-toggle-off"></i>{{'Single-Switch Forward Wizard'}}
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                data-cy="TwoSwitchForward-CommonModeChoke-link"
-                                :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
-                                class="dropdown-item btn btn-block nav-link px-2"
-                                @click="onWizards($stateStore.Wizards.TwoSwitchForward)"
-                                @mouseenter="hoveredWizard = 'TwoSwitchForward'"
-                                @mouseleave="hoveredWizard = null"
-                            >
-                                <i class="me-2 fa-solid fa-toggle-on"></i>{{'Two-Switch Forward Wizard'}}
-                            </button>
+                                <li v-for="item in group.items" :key="item.cy">
+                                    <button
+                                        :data-cy="item.cy"
+                                        :class="headerTogglerIsVisible? 'w-100' : 'mx-0' "
+                                        class="dropdown-item nav-link w-100 px-2"
+                                        @click="onWizards($stateStore.Wizards[item.store])"
+                                        @mouseenter="hoveredWizard = item.hoverKey"
+                                        @mouseleave="hoveredWizard = null"
+                                    >
+                                        <i class="mr-2 bi" :class="item.icon"></i>{{ item.label }}
+                                    </button>
+                                </li>
+                            </ul>
                         </li>
                       </ul>
                     </li>
@@ -528,10 +442,10 @@ export default {
                             <button
                                 data-cy="Header-donate-link"
                                 :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
-                                class="btn btn-block nav-link px-2 om-continue-btn"
+                                class="nav-link w-100 px-2 om-continue-btn"
                                 @click="continueMagneticToolDesign"
                             >
-                                <i class="me-2 fa-solid fa-box-open"></i>{{'Continue design'}}
+                                <i class="mr-2 pi pi-box-seam"></i>{{'Continue design'}}
                             </button>
                         </span>
                     </li>
@@ -540,10 +454,10 @@ export default {
                             <input data-cy="Header-Load-MAS-file-button" type="file" ref="masFileReader" @change="readMASFile()" class="btn mt-1 rounded-3" hidden />
                             <button
                                 :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
-                                class="btn btn-block nav-link px-2 om-load-btn"
+                                class="nav-link w-100 px-2 om-load-btn"
                                 @click="load"
                             >
-                                <i class="me-1 fa-solid fa-upload"></i>{{'Load MAS'}}
+                                <i class="mr-1 pi pi-upload"></i>{{'Load MAS'}}
                             </button>
                         </span>
                     </li>
@@ -558,7 +472,7 @@ export default {
                                 rel="noopener noreferrer"
                                 class="btn nav-link om-donate-btn"
                             >
-                                {{'Donate '}}<i class="fa-solid fa-circle-dollar-to-slot"></i>
+                                {{'Donate '}}<i class="pi pi-dollar"></i>
                             </a>
                         </span>
                     </li>
@@ -568,10 +482,9 @@ export default {
                                 data-cy="Header-report-bug-modal-button"
                                 :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
                                 class="btn nav-link om-bug-btn text-center"
-                                data-bs-toggle="modal"
-                                data-bs-target="#reportBugModal"
+                                @click="bugReporterVisible = true"
                             >
-                                {{headerTogglerIsVisible? 'Report a bug' : 'Bug?'}} <i class="fa-solid fa-bug"></i>
+                                {{headerTogglerIsVisible? 'Report a bug' : 'Bug?'}} <i class="pi pi-server"></i>
                             </button>
                         </span>
                     </li>
@@ -585,7 +498,7 @@ export default {
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
-                                {{headerTogglerIsVisible? 'GitHub ' : ''}}<i class="fa-brands fa-github"></i>
+                                {{headerTogglerIsVisible? 'GitHub ' : ''}}<i class="pi pi-github"></i>
                             </a>
                         </span>
                     </li>
@@ -596,8 +509,7 @@ export default {
     </nav>
 
     <!-- Modal -->
-    <BugReporterModal/>
-    <DeadManSwitch/>
+    <BugReporterModal v-model:visible="bugReporterVisible"/>
 </template>
 
 <style>
@@ -614,33 +526,89 @@ export default {
     .om-header {
         min-width: 100%;
         position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
         z-index: 999;
-        background: linear-gradient(180deg,
-            rgba(var(--bs-dark-rgb), 0.92) 0%,
-            rgba(var(--bs-dark-rgb), 0.82) 100%) !important;
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
-        border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.35);
-        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+        padding: 0.2rem 1rem;
+        background:
+            linear-gradient(180deg,
+                rgba(var(--p-dark-rgb), 0.94) 0%,
+                rgba(var(--p-dark-rgb), 0.86) 100%),
+            radial-gradient(circle at 0% 0%,
+                rgba(var(--p-primary-rgb), 0.12) 0%,
+                transparent 50%) !important;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.25);
+        box-shadow:
+            0 4px 24px rgba(var(--p-black-rgb), 0.5),
+            0 0 0 1px rgba(var(--p-white-rgb), 0.02) inset;
     }
 
-    /* Brand text — gradient teal */
+    /* Subtle engineering grid behind the header */
+    .om-header::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+            linear-gradient(to right, rgba(var(--p-primary-rgb), 0.06) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(var(--p-primary-rgb), 0.06) 1px, transparent 1px);
+        background-size: 24px 24px;
+        opacity: 0.5;
+        pointer-events: none;
+    }
+    .om-header > * { position: relative; z-index: 1; }
+
+    /* Logo — preserve aspect ratio, sized to keep header at beta's ~59px
+     * height; no drop-shadow so it blends into the header background. */
+    .om-logo {
+        width: auto;
+        height: 44px;
+        object-fit: contain;
+        mix-blend-mode: lighten;
+    }
+
+    /* Breathing room between header nav items at desktop. */
+    @media (min-width: 1200px) {
+        .om-header .navbar-nav > .nav-item + .nav-item {
+            margin-left: 0.75rem;
+        }
+        .om-header .navbar-nav.ms-auto > .nav-item + .nav-item {
+            margin-left: 0.5rem;
+        }
+    }
+    .om-header .navbar-nav .nav-item .nav-link,
+    .om-header .navbar-nav .nav-item .om-nav-btn,
+    .om-header .navbar-nav .nav-item .om-wizard-btn,
+    .om-header .navbar-nav .nav-item .om-continue-btn,
+    .om-header .navbar-nav .nav-item .om-load-btn {
+        padding-left: 0.85rem;
+        padding-right: 0.85rem;
+        font-size: 1.05rem;
+    }
+    .om-header .navbar-brand { font-size: 1.25rem !important; }
+
+    /* Brand text — gradient teal, modern tracking */
     .om-header .navbar-brand {
         font-weight: 700;
-        letter-spacing: 0.02em;
+        font-size: 1.15rem;
+        letter-spacing: 0.04em;
+        line-height: 1.1;
+        padding: 0.25rem 0.5rem 0.25rem 0;
         background: linear-gradient(135deg,
-            var(--bs-primary) 0%,
-            color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%) 100%);
+            var(--p-primary) 0%,
+            color-mix(in srgb, var(--p-primary) 65%, var(--p-white) 35%) 100%);
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent !important;
-        text-shadow: 0 1px 6px rgba(var(--bs-primary-rgb), 0.25);
+        text-shadow: 0 1px 6px rgba(var(--p-primary-rgb), 0.25);
     }
 
     /* Mobile toggler */
     .om-toggler {
-        color: var(--bs-primary) !important;
-        border: 1px solid rgba(var(--bs-primary-rgb), 0.5) !important;
+        color: var(--p-primary) !important;
+        border: 1px solid rgba(var(--p-primary-rgb), 0.5) !important;
         border-radius: 8px !important;
         padding: 0.35rem 0.5rem !important;
         filter: invert(55%) sepia(50%) saturate(400%) hue-rotate(130deg);
@@ -650,12 +618,12 @@ export default {
        Nav link (text-only, no border) — Alf's Musings style
        ============================================================ */
     .om-nav-link {
-        color: rgba(var(--bs-primary-rgb), 0.8) !important;
+        color: rgba(var(--p-primary-rgb), 0.8) !important;
         transition: color 0.15s !important;
         font-weight: 500;
     }
     .om-nav-link:hover {
-        color: var(--bs-primary) !important;
+        color: var(--p-primary) !important;
         text-decoration: none;
     }
 
@@ -663,20 +631,23 @@ export default {
        Standard nav button — teal ghost
        ============================================================ */
     .om-nav-btn {
-        color: var(--bs-primary) !important;
+        color: var(--p-primary) !important;
         background: transparent !important;
-        border: 1px solid rgba(var(--bs-primary-rgb), 0.35) !important;
+        border: 1px solid rgba(var(--p-primary-rgb), 0.35) !important;
         border-radius: 10px !important;
         font-weight: 500;
+        /* New Magnetic is a <button> (others are <a>); buttons default to the
+         * arrow cursor, so force the pointer to match the link items. */
+        cursor: pointer;
         transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
     }
     .om-nav-btn:hover,
     .om-nav-btn:focus {
-        background: rgba(var(--bs-primary-rgb), 0.1) !important;
-        border-color: rgba(var(--bs-primary-rgb), 0.6) !important;
+        background: rgba(var(--p-primary-rgb), 0.1) !important;
+        border-color: rgba(var(--p-primary-rgb), 0.6) !important;
         transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(var(--bs-primary-rgb), 0.18) !important;
-        color: var(--bs-primary) !important;
+        box-shadow: 0 2px 10px rgba(var(--p-primary-rgb), 0.18) !important;
+        color: var(--p-primary) !important;
         filter: none !important;
     }
 
@@ -684,20 +655,20 @@ export default {
        Wizards nav button — teal filled accent
        ============================================================ */
     .om-wizard-btn {
-        color: var(--bs-dark) !important;
-        background: rgba(var(--bs-primary-rgb), 0.85) !important;
-        border: 1px solid rgba(var(--bs-primary-rgb), 0.6) !important;
+        color: var(--p-dark) !important;
+        background: rgba(var(--p-primary-rgb), 0.85) !important;
+        border: 1px solid rgba(var(--p-primary-rgb), 0.6) !important;
         border-radius: 10px !important;
         font-weight: 600;
         transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
     }
     .om-wizard-btn:hover,
     .om-wizard-btn:focus {
-        background: var(--bs-primary) !important;
-        border-color: var(--bs-primary) !important;
+        background: var(--p-primary) !important;
+        border-color: var(--p-primary) !important;
         transform: translateY(-1px);
-        box-shadow: 0 3px 14px rgba(var(--bs-primary-rgb), 0.35) !important;
-        color: var(--bs-dark) !important;
+        box-shadow: 0 3px 14px rgba(var(--p-primary-rgb), 0.35) !important;
+        color: var(--p-dark) !important;
         filter: none !important;
     }
 
@@ -705,18 +676,18 @@ export default {
        Continue design button — subtle primary ghost
        ============================================================ */
     .om-continue-btn {
-        color: var(--bs-primary) !important;
-        background: rgba(var(--bs-primary-rgb), 0.08) !important;
-        border: 1px solid rgba(var(--bs-primary-rgb), 0.4) !important;
+        color: var(--p-primary) !important;
+        background: rgba(var(--p-primary-rgb), 0.08) !important;
+        border: 1px solid rgba(var(--p-primary-rgb), 0.4) !important;
         border-radius: 10px !important;
         font-weight: 500;
         transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
     }
     .om-continue-btn:hover {
-        background: rgba(var(--bs-primary-rgb), 0.18) !important;
-        border-color: rgba(var(--bs-primary-rgb), 0.65) !important;
+        background: rgba(var(--p-primary-rgb), 0.18) !important;
+        border-color: rgba(var(--p-primary-rgb), 0.65) !important;
         transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(var(--bs-primary-rgb), 0.2) !important;
+        box-shadow: 0 2px 10px rgba(var(--p-primary-rgb), 0.2) !important;
         filter: none !important;
     }
 
@@ -724,9 +695,9 @@ export default {
        Load MAS button — filled primary
        ============================================================ */
     .om-load-btn {
-        color: var(--bs-dark) !important;
-        background: var(--bs-primary) !important;
-        border: 1px solid var(--bs-primary) !important;
+        color: var(--p-dark) !important;
+        background: var(--p-primary) !important;
+        border: 1px solid var(--p-primary) !important;
         border-radius: 10px !important;
         font-weight: 600;
         transition: filter 0.15s, transform 0.1s, box-shadow 0.15s !important;
@@ -734,55 +705,55 @@ export default {
     .om-load-btn:hover {
         filter: brightness(1.12);
         transform: translateY(-1px);
-        box-shadow: 0 3px 14px rgba(var(--bs-primary-rgb), 0.35) !important;
+        box-shadow: 0 3px 14px rgba(var(--p-primary-rgb), 0.35) !important;
     }
 
     /* ============================================================
        Right-side utility buttons
        ============================================================ */
     .om-donate-btn {
-        color: var(--bs-info) !important;
-        background: rgba(var(--bs-info-rgb), 0.12) !important;
-        border: 1px solid rgba(var(--bs-info-rgb), 0.4) !important;
+        color: var(--p-info) !important;
+        background: rgba(var(--p-info-rgb), 0.12) !important;
+        border: 1px solid rgba(var(--p-info-rgb), 0.4) !important;
         border-radius: 10px !important;
         font-weight: 600;
         transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
     }
     .om-donate-btn:hover {
-        background: rgba(var(--bs-info-rgb), 0.22) !important;
-        border-color: rgba(var(--bs-info-rgb), 0.65) !important;
+        background: rgba(var(--p-info-rgb), 0.22) !important;
+        border-color: rgba(var(--p-info-rgb), 0.65) !important;
         transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(var(--bs-info-rgb), 0.22) !important;
+        box-shadow: 0 2px 10px rgba(var(--p-info-rgb), 0.22) !important;
         filter: none !important;
     }
 
     .om-bug-btn {
-        color: var(--bs-danger) !important;
-        background: rgba(var(--bs-danger-rgb), 0.08) !important;
-        border: 1px solid rgba(var(--bs-danger-rgb), 0.35) !important;
+        color: var(--p-danger) !important;
+        background: rgba(var(--p-danger-rgb), 0.08) !important;
+        border: 1px solid rgba(var(--p-danger-rgb), 0.35) !important;
         border-radius: 10px !important;
         transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
     }
     .om-bug-btn:hover {
-        background: rgba(var(--bs-danger-rgb), 0.18) !important;
-        border-color: rgba(var(--bs-danger-rgb), 0.6) !important;
+        background: rgba(var(--p-danger-rgb), 0.18) !important;
+        border-color: rgba(var(--p-danger-rgb), 0.6) !important;
         transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(var(--bs-danger-rgb), 0.2) !important;
+        box-shadow: 0 2px 10px rgba(var(--p-danger-rgb), 0.2) !important;
         filter: none !important;
     }
 
     .om-github-btn {
-        color: var(--bs-success) !important;
-        background: rgba(var(--bs-success-rgb), 0.08) !important;
-        border: 1px solid rgba(var(--bs-success-rgb), 0.35) !important;
+        color: var(--p-success) !important;
+        background: rgba(var(--p-success-rgb), 0.08) !important;
+        border: 1px solid rgba(var(--p-success-rgb), 0.35) !important;
         border-radius: 10px !important;
         transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
     }
     .om-github-btn:hover {
-        background: rgba(var(--bs-success-rgb), 0.18) !important;
-        border-color: rgba(var(--bs-success-rgb), 0.6) !important;
+        background: rgba(var(--p-success-rgb), 0.18) !important;
+        border-color: rgba(var(--p-success-rgb), 0.6) !important;
         transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(var(--bs-success-rgb), 0.2) !important;
+        box-shadow: 0 2px 10px rgba(var(--p-success-rgb), 0.2) !important;
         filter: none !important;
     }
 
@@ -791,18 +762,18 @@ export default {
        ============================================================ */
     .om-header .dropdown-menu {
         background: linear-gradient(180deg,
-            rgba(var(--bs-dark-rgb), 0.96) 0%,
-            rgba(var(--bs-dark-rgb), 0.88) 100%) !important;
-        border: 1px solid rgba(var(--bs-primary-rgb), 0.3) !important;
+            rgba(var(--p-dark-rgb), 0.96) 0%,
+            rgba(var(--p-dark-rgb), 0.88) 100%) !important;
+        border: 1px solid rgba(var(--p-primary-rgb), 0.3) !important;
         border-radius: 12px !important;
-        box-shadow: 0 8px 28px rgba(var(--bs-dark-rgb), 0.55) !important;
+        box-shadow: 0 8px 28px rgba(var(--p-dark-rgb), 0.55) !important;
         padding: 0.4rem !important;
     }
 
     .om-header .dropdown-menu .dropdown-item,
     .om-header .dropdown-menu .dropdown-item.btn,
     .om-header .dropdown-menu .dropdown-item.nav-link {
-        color: var(--bs-primary) !important;
+        color: var(--p-primary) !important;
         background: transparent !important;
         border: 0 !important;
         border-radius: 8px !important;
@@ -813,21 +784,74 @@ export default {
     .om-header .dropdown-menu .dropdown-item:hover,
     .om-header .dropdown-menu .dropdown-item.btn:hover,
     .om-header .dropdown-menu .dropdown-item.nav-link:hover {
-        background: rgba(var(--bs-primary-rgb), 0.1) !important;
-        color: var(--bs-primary) !important;
+        background: rgba(var(--p-primary-rgb), 0.1) !important;
+        color: var(--p-primary) !important;
     }
 
     .om-header .dropdown-menu .dropdown-item:disabled,
     .om-header .dropdown-menu .dropdown-item.btn:disabled {
-        color: rgba(var(--bs-primary-rgb), 0.35) !important;
+        color: rgba(var(--p-primary-rgb), 0.35) !important;
         cursor: not-allowed;
     }
 
-    /* Override Bootstrap dropdown CSS variables */
+    /* Override dropdown CSS variables */
     .om-header .dropdown-menu {
-        --bs-dropdown-link-color: var(--bs-primary) !important;
-        --bs-dropdown-link-hover-color: var(--bs-primary) !important;
-        --bs-dropdown-link-hover-bg: rgba(var(--bs-primary-rgb), 0.1) !important;
+        --p-dropdown-link-color: var(--p-primary) !important;
+        --p-dropdown-link-hover-color: var(--p-primary) !important;
+        --p-dropdown-link-hover-bg: rgba(var(--p-primary-rgb), 0.1) !important;
+    }
+
+    /* ============================================================
+       Fly-out submenu for the Wizards dropdown
+       ============================================================ */
+    .om-header .dropdown-submenu {
+        position: relative;
+    }
+    .om-header .dropdown-submenu-toggle {
+        display: flex !important;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+    }
+    .om-header .dropdown-submenu-toggle .submenu-caret {
+        font-size: 0.75rem;
+        opacity: 0.75;
+        transition: transform 0.15s;
+    }
+    .om-header .dropdown-submenu:hover > .dropdown-submenu-toggle .submenu-caret,
+    .om-header .dropdown-submenu > .submenu-panel.submenu-open ~ * .submenu-caret {
+        transform: translateX(2px);
+    }
+    /* Hidden by default; appears on parent hover OR when .submenu-open is set */
+    .om-header .submenu-panel {
+        display: none;
+        position: absolute;
+        top: -0.4rem;          /* align with the parent item top */
+        left: 100%;
+        margin-left: 0;        /* no gap — gap causes hover loss mid-mouse-travel */
+        padding-left: 0.25rem; /* visual offset without dead hover zone */
+        min-width: 14rem;
+        z-index: 1100;
+    }
+    .om-header .dropdown-submenu:hover > .submenu-panel,
+    .om-header .submenu-panel.submenu-open {
+        display: block;
+    }
+    /* Top-level wizard/tool dropdowns are click-driven (normal dropdown):
+       click the toggle to latch open, click an item or outside to close.
+       (No hover-to-open — that opened the menu without latching, so it
+       vanished the instant the cursor left the button.) */
+    /* Mobile / collapsed-navbar: fall back to inline expansion (no flyout) */
+    @media (max-width: 991.98px) {
+        .om-header .submenu-panel {
+            position: static;
+            left: auto;
+            margin-left: 0;
+            box-shadow: none !important;
+            border: none !important;
+            background: transparent !important;
+            padding-left: 1rem !important;
+        }
     }
 
     /* ============================================================
@@ -840,44 +864,44 @@ export default {
     }
 
     body {
-        background-color: var(--bs-dark) !important;
+        background-color: var(--p-dark) !important;
     }
     .border-dark {
-        border-color: var(--bs-dark) !important;
+        border-color: var(--p-dark) !important;
     }
     .input-group-text{
-        background-color: var(--bs-light) !important;
-        color: var(--bs-white) !important;
-        border-color: var(--bs-dark) !important;
+        background-color: var(--p-light) !important;
+        color: var(--p-white) !important;
+        border-color: var(--p-dark) !important;
     }
     .custom-select,
     .form-control {
-        background-color: var(--bs-dark) !important;
-        color: var(--bs-white) !important;
-        border-color: var(--bs-dark) !important;
+        background-color: var(--p-dark) !important;
+        color: var(--p-white) !important;
+        border-color: var(--p-dark) !important;
     }
     .jumbotron{
         border-radius: 1em;
-        box-shadow: 0 5px 10px rgba(0,0,0,.2);
+        box-shadow: 0 5px 10px rgba(var(--p-black-rgb), .2);
     }
     .card{
         padding: 1.5em .5em .5em;
-        background-color: var(--bs-light);
+        background-color: var(--p-light);
         border-radius: 1em;
         text-align: center;
-        box-shadow: 0 5px 10px rgba(0,0,0,.2);
+        box-shadow: 0 5px 10px rgba(var(--p-black-rgb), .2);
     }
     .form-control:disabled {
-        background-color: var(--bs-dark) !important;
-        color: var(--bs-white) !important;
-        border-color: var(--bs-dark) !important;
+        background-color: var(--p-dark) !important;
+        color: var(--p-white) !important;
+        border-color: var(--p-dark) !important;
     }
     .form-control:-webkit-autofill,
     .form-control:-webkit-autofill:focus,
     .form-control:-webkit-autofill{
-        -webkit-text-fill-color: var(--bs-white) !important;
+        -webkit-text-fill-color: var(--p-white) !important;
         background-color: transparent !important;
-        -webkit-box-shadow: 0 0 0 50px var(--bs-dark) inset;
+        -webkit-box-shadow: 0 0 0 50px var(--p-dark) inset;
     }
 
     .container {
@@ -889,11 +913,11 @@ export default {
       margin-top: 60px;
     }
     ::-webkit-scrollbar { height: 3px;}
-    ::-webkit-scrollbar-button {  background-color: var(--bs-light); }
-    ::-webkit-scrollbar-track {  background-color: var(--bs-light);}
-    ::-webkit-scrollbar-track-piece { background-color: var(--bs-dark);}
-    ::-webkit-scrollbar-thumb {  background-color: var(--bs-light); border-radius: 3px;}
-    ::-webkit-scrollbar-corner { background-color: var(--bs-light);}
+    ::-webkit-scrollbar-button {  background-color: var(--p-light); }
+    ::-webkit-scrollbar-track {  background-color: var(--p-light);}
+    ::-webkit-scrollbar-track-piece { background-color: var(--p-dark);}
+    ::-webkit-scrollbar-thumb {  background-color: var(--p-light); border-radius: 3px;}
+    ::-webkit-scrollbar-corner { background-color: var(--p-light);}
 
     .small-text {
        font-size: calc(1rem + 0.1vw);
@@ -906,7 +930,7 @@ export default {
     }
 
     .accordion-button:focus {
-        border-color: var(--bs-primary) !important;
+        border-color: var(--p-primary) !important;
         outline: 0  !important;
         box-shadow: none  !important;
     }

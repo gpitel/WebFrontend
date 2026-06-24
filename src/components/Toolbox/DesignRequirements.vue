@@ -1,18 +1,18 @@
 <script setup>
 import { ref } from 'vue'
 import { useMasStore } from '../../stores/mas'
-import { toTitleCase, toPascalCase, deepCopy, combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
-import { tooltipsMagneticSynthesisDesignRequirements } from '/WebSharedComponents/assets/js/texts.js'
-import { defaultDesignRequirements, compulsoryRequirements, designRequirementsOrdered, isolationSideOrdered, IsolationSideOrdered, minimumMaximumScalePerParameter} from '/WebSharedComponents/assets/js/defaults.js'
-import { Market, ConnectionType, Topologies } from '/WebSharedComponents/assets/ts/MAS.ts'
+import { toTitleCase, toPascalCase, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import { tooltipsMagneticSynthesisDesignRequirements } from 'WebSharedComponents/assets/js/texts.js'
+import { defaultDesignRequirements, compulsoryRequirements, designRequirementsOrdered, isolationSideOrdered, IsolationSideOrdered, minimumMaximumScalePerParameter} from 'WebSharedComponents/assets/js/defaults.js'
+import { Market, ConnectionType, Topologies, WiringTechnology, IsolationSide } from 'WebSharedComponents/assets/ts/MAS.ts'
 import Insulation from './DesignRequirements/Insulation.vue'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
 import MaximumDimensions from './DesignRequirements/MaximumDimensions.vue'
 import Impedances from './DesignRequirements/Impedances.vue'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import ElementFromListRadio from '/WebSharedComponents/DataInput/ElementFromListRadio.vue'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import ElementFromListRadio from 'WebSharedComponents/DataInput/ElementFromListRadio.vue'
 import ArrayDimensionWithTolerance from './DesignRequirements/ArrayDimensionWithTolerance.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 import ArrayElementFromList from './DesignRequirements/ArrayElementFromList.vue'
 import Name from './DesignRequirements/Name.vue'
 </script>
@@ -34,8 +34,8 @@ export default {
             numberWindings: numberWindings
         }
         const wiringTechnologyOptions = {
-            "Planar": "Printed",
-            "Wound": "Wound",
+            "Planar": WiringTechnology.Printed,
+            "Wound": WiringTechnology.Wound,
         }
 
         return {
@@ -45,6 +45,34 @@ export default {
         }
     },
     computed: {
+        topologyLabels() {
+            const out = {};
+            Object.values(Topologies).forEach(v => {
+                // camelCase → "Camel Case"
+                out[v] = v.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()).trim();
+            });
+            return out;
+        },
+        marketLabels() {
+            const out = {};
+            Object.values(Market).forEach(v => { out[v] = v.charAt(0).toUpperCase() + v.slice(1); });
+            return out;
+        },
+        connectionTypeLabels() {
+            return {
+                flyingLead: 'Flying Lead',
+                pcbPad: 'PCB Pad',
+                pin: 'Pin',
+                smt: 'SMT',
+                screw: 'Screw',
+                tht: 'THT',
+            };
+        },
+        isolationSideLabels() {
+            const out = {};
+            Object.values(IsolationSide).forEach(v => { out[v] = v.charAt(0).toUpperCase() + v.slice(1); });
+            return out;
+        },
         getNumberPossibleWindings() {
             if (this.$stateStore.getCurrentApplication() == this.$stateStore.SupportedApplications.Power) {
                 return Array.from({length: 12}, (_, i) => i + 1);
@@ -79,20 +107,6 @@ export default {
                 shortenedLabels[value] = label;
             })
             return shortenedLabels
-        },
-        // Terminal-type mode; defaults to Basic so pre-flag persisted state stays locked.
-        terminalMode() {
-            const mode = this.$stateStore.magneticBuilder.mode.terminal;
-            return mode != null ? mode : this.$stateStore.MagneticBuilderModes.Basic;
-        },
-        connectionTypeValues() {
-            return Object.values(ConnectionType);
-        },
-        // Value for the Simple dropdown; falls back to the first type so it is never blank.
-        simpleTerminalType() {
-            const terminalType = this.masStore.mas.inputs.designRequirements.terminalType;
-            return (Array.isArray(terminalType) && terminalType.length > 0 && terminalType[0] != null)
-                ? terminalType[0] : this.connectionTypeValues[0];
         },
 
     },
@@ -174,23 +188,6 @@ export default {
                 this.masStore.mas.inputs.designRequirements.turnsRatios = newElementsTurnsRatios;
                 this.masStore.mas.magnetic.coil.functionalDescription = newElementsCoil;
                 this.masStore.updatedTurnsRatios();
-
-                // Keep terminalType sized to the winding count (Simple fans the value out; Advanced keeps per-lead types).
-                const designRequirements = this.masStore.mas.inputs.designRequirements;
-                if (designRequirements.terminalType != null) {
-                    if (this.terminalMode == this.$stateStore.MagneticBuilderModes.Basic) {
-                        this.applyTerminalTypeToAll(this.simpleTerminalType);
-                    }
-                    else {
-                        const target = designRequirements.turnsRatios.length + 1;
-                        while (designRequirements.terminalType.length < target) {
-                            designRequirements.terminalType.push(this.simpleTerminalType);
-                        }
-                        if (designRequirements.terminalType.length > target) {
-                            designRequirements.terminalType.length = target;
-                        }
-                    }
-                }
             }
         },
         hasError() {
@@ -198,71 +195,6 @@ export default {
         },
         updatedIsolationSides(value, index) {
             this.masStore.mas.magnetic.coil.functionalDescription[index].isolationSide = value;
-        },
-        // Simple mode: fan one type onto every winding (terminalType) and every existing lead (connection.type).
-        applyTerminalTypeToAll(value) {
-            const designRequirements = this.masStore.mas.inputs.designRequirements;
-            const numberWindings = designRequirements.turnsRatios.length + 1;
-            designRequirements.terminalType = new Array(numberWindings).fill(value);
-            const coil = this.masStore.mas.magnetic != null ? this.masStore.mas.magnetic.coil : null;
-            const windings = (coil != null && Array.isArray(coil.functionalDescription))
-                ? coil.functionalDescription : [];
-            windings.forEach((winding) => {
-                if (Array.isArray(winding.connections)) {
-                    winding.connections.forEach((connection) => {
-                        if (connection != null) {
-                            connection.type = value;
-                        }
-                    });
-                }
-            });
-        },
-        allConnectionTypes() {
-            const coil = this.masStore.mas.magnetic != null ? this.masStore.mas.magnetic.coil : null;
-            const windings = (coil != null && Array.isArray(coil.functionalDescription))
-                ? coil.functionalDescription : [];
-            const types = [];
-            windings.forEach((winding) => {
-                (Array.isArray(winding.connections) ? winding.connections : []).forEach((connection) => {
-                    if (connection != null && connection.type != null && connection.type !== '') {
-                        types.push(connection.type);
-                    }
-                });
-            });
-            return types;
-        },
-        mostCommonTerminalType() {
-            const types = this.allConnectionTypes();
-            if (types.length === 0) {
-                return this.simpleTerminalType;
-            }
-            const counts = {};
-            let best = types[0];
-            types.forEach((type) => {
-                counts[type] = (counts[type] || 0) + 1;
-                if (counts[type] > (counts[best] || 0)) {
-                    best = type;
-                }
-            });
-            return best;
-        },
-        setTerminalMode(mode) {
-            const modes = this.$stateStore.MagneticBuilderModes;
-            if (mode == modes.Basic && this.terminalMode != modes.Basic) {
-                // Advanced -> Simple flattens per-lead types onto a single value.
-                const types = this.allConnectionTypes();
-                const nonUniform = types.length > 0 && !types.every((type) => type === types[0]);
-                if (nonUniform && !window.confirm(
-                    'Switching to Simple applies one terminal type to every winding and lead. '
-                    + 'Differing per-lead values will be overwritten. Continue?')) {
-                    return;
-                }
-                this.$stateStore.magneticBuilder.mode.terminal = modes.Basic;
-                this.applyTerminalTypeToAll(this.mostCommonTerminalType());
-            }
-            else {
-                this.$stateStore.magneticBuilder.mode.terminal = mode;
-            }
         },
         updatedWiringTechnologies(value, index) {
             if (this.masStore.mas.magnetic.coil.turnsDescription != null) {
@@ -285,7 +217,7 @@ export default {
             <!-- Left: Requirements list panel -->
             <div class="dr-list-panel">
                 <div class="dr-panel-header">
-                    <i class="fa-solid fa-clipboard-list"></i>
+                    <i class="pi pi-check-square"></i>
                     <span>Requirements</span>
                 </div>
                 <div class="dr-list-body">
@@ -304,7 +236,7 @@ export default {
                             v-if="!compulsoryRequirements[$stateStore.getCurrentApplication()].includes(requirementName)"
                             :class="masStore.mas.inputs.designRequirements[requirementName]==null ? 'dr-btn dr-btn-add' : 'dr-btn dr-btn-remove'"
                             @click="requirementButtonClicked(requirementName)">
-                            <i :class="masStore.mas.inputs.designRequirements[requirementName]==null ? 'fa-solid fa-plus' : 'fa-solid fa-xmark'"></i>
+                            <i :class="masStore.mas.inputs.designRequirements[requirementName]==null ? 'pi pi-plus' : 'pi pi-times'"></i>
                             <span>{{ masStore.mas.inputs.designRequirements[requirementName]==null ? 'Add' : 'Remove' }}</span>
                         </button>
                         <button
@@ -312,7 +244,7 @@ export default {
                             v-if="compulsoryRequirements[$stateStore.getCurrentApplication()].includes(requirementName)"
                             class="dr-btn dr-btn-required"
                             disabled>
-                            <i class="fa-solid fa-lock"></i>
+                            <i class="pi pi-lock"></i>
                             <span>{{ (requirementName == 'turnsRatios' && masStore.mas.inputs.designRequirements.turnsRatios.length == 0) ? 'Not Req.' : 'Required' }}</span>
                         </button>
                     </div>
@@ -322,11 +254,11 @@ export default {
             <!-- Right: Configuration panel -->
             <div class="dr-detail-panel">
                 <div class="dr-panel-header">
-                    <i class="fa-solid fa-sliders"></i>
+                    <i class="pi pi-sliders-h"></i>
                     <span>Configuration</span>
                 </div>
                 <div class="dr-detail-body">
-<!--                 <Name class="border-bottom border-top py-2" 
+<!--                 <Name class="border-top-1 border-bottom-1 border-solid border-300 py-2" 
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     :name="'name'"
                     :dataTestLabel="dataTestLabel + '-Name'"
@@ -340,12 +272,15 @@ export default {
                     @hasError="hasError"
                 /> -->
 
-                <ElementFromList class="border-bottom border-top py-2 ps-4"
+                <ElementFromList class="border-top-1 border-bottom-1 border-solid border-300 py-2 pl-4"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     :name="'numberWindings'"
                     :dataTestLabel="dataTestLabel + '-NumberWindings'"
                     :options="getNumberPossibleWindings"
-                    :titleSameRow="true"
+                    :titleSameRow="false"
+                    :justifyContent="true"
+                    :labelWidthProportionClass="'col-12 md:col-7'"
+                    :selectStyleClass="'col-12 md:col-5'"
                     :valueFontSize="$styleStore.designRequirements.inputFontSize"
                     :labelFontSize="$styleStore.designRequirements.inputTitleFontSize"
                     :labelBgColor="$styleStore.designRequirements.inputLabelBgColor"
@@ -355,7 +290,7 @@ export default {
                     @update="updatedNumberElements"
                 />
 
-                <DimensionWithTolerance class="border-bottom py-2 ps-2"
+                <DimensionWithTolerance class="border-bottom-1 border-solid border-300 py-2 pl-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.magnetizingInductance != null"
                     :name="'magnetizingInductance'"
@@ -366,7 +301,7 @@ export default {
                     :min="minimumMaximumScalePerParameter['inductance']['min']"
                     :max="minimumMaximumScalePerParameter['inductance']['max']"
                     v-model="masStore.mas.inputs.designRequirements.magnetizingInductance"
-                    :unitExtraStyleClass="'py-1 ps-1 mt-1'"
+                    
                     :addButtonStyle="$styleStore.designRequirements.requirementButton"
                     :valueFontSize="$styleStore.designRequirements.inputFontSize"
                     :titleFontSize="$styleStore.designRequirements.inputTitleFontSize"
@@ -376,7 +311,7 @@ export default {
                     @hasError="hasError"
                 />
 
-                <Impedances class="border-bottom py-2 px-0"
+                <Impedances class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.minimumImpedance != null"
                     :dataTestLabel="dataTestLabel + '-MinimumImpedance'"
@@ -387,12 +322,12 @@ export default {
                     :labelBgColor="$styleStore.designRequirements.inputLabelBgColor"
                     :valueBgColor="$styleStore.designRequirements.inputValueBgColor"
                     :textColor="$styleStore.designRequirements.inputTextColor"
-                    :unitExtraStyleClass="'py-1 ps-1'"
+                    
                 />
 
-                <ArrayDimensionWithTolerance class="border-bottom py-2"
+                <ArrayDimensionWithTolerance class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
-                    v-if="!$stateStore.hasCurrentApplicationMirroredWindings() && masStore.mas.inputs.designRequirements.turnsRatios != null && masStore.mas.inputs.designRequirements.turnsRatios.length > 0"
+                    v-if="!masStore.hasMirroredWindings && masStore.mas.inputs.designRequirements.turnsRatios != null && masStore.mas.inputs.designRequirements.turnsRatios.length > 0"
                     :name="'turnsRatios'"
                     :dataTestLabel="dataTestLabel + '-TurnsRatios'"
                     :defaultField="'nominal'"
@@ -407,12 +342,12 @@ export default {
                     :textColor="$styleStore.designRequirements.inputTextColor"
                     @hasError="hasError"
                 />
-                <ElementFromListRadio class="border-bottom py-2 ps-4"
-                    v-if="!$stateStore.hasCurrentApplicationMirroredWindings() && masStore.mas.inputs.designRequirements.wiringTechnology != null"
+                <ElementFromListRadio class="border-bottom-1 border-solid border-300 py-2 pl-4"
+                    v-if="!masStore.hasMirroredWindings && masStore.mas.inputs.designRequirements.wiringTechnology != null"
                     :name="'wiringTechnology'"
                     :dataTestLabel="dataTestLabel + '-WiringTechnology'"
                     :options="wiringTechnologyOptions"
-                    :titleSameRow="true"
+                    :titleSameRow="false"
                     v-model="masStore.mas.inputs.designRequirements"
                     :labelWidthProportionClass="'col-5'"
                     :valueWidthProportionClass="'col-3'"
@@ -424,7 +359,7 @@ export default {
                     @update="updatedWiringTechnologies"
                 />
 
-                <Insulation class="border-bottom py-2"
+                <Insulation class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.insulation != null"
                     :dataTestLabel="dataTestLabel + '-Insulation'"
@@ -438,7 +373,7 @@ export default {
                     :textColor="$styleStore.designRequirements.inputTextColor"
                 />
 
-                <ArrayDimensionWithTolerance class="border-bottom py-2"
+                <ArrayDimensionWithTolerance class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.leakageInductance != null"
                     :name="'leakageInductance'"
@@ -459,7 +394,7 @@ export default {
                     @hasError="hasError"
                 />
 
-                <ArrayDimensionWithTolerance class="border-bottom py-2"
+                <ArrayDimensionWithTolerance class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.strayCapacitance != null"
                     :name="'strayCapacitance'"
@@ -480,7 +415,7 @@ export default {
                     @hasError="hasError"
                 />
 
-                <DimensionWithTolerance class="border-bottom py-2 ps-3"
+                <DimensionWithTolerance class="border-bottom-1 border-solid border-300 py-2 pl-3"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.operatingTemperature != null"
                     :name="'operatingTemperature'"
@@ -500,7 +435,7 @@ export default {
                     @hasError="hasError"
                 />
               
-                <Dimension class="border-bottom py-2 ps-4"
+                <Dimension class="border-bottom-1 border-solid border-300 py-2 pl-4"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.maximumWeight != null"
                     :name="'maximumWeight'"
@@ -509,6 +444,9 @@ export default {
                     :min="minimumMaximumScalePerParameter['weight']['min']"
                     :max="minimumMaximumScalePerParameter['weight']['max']"
                     :defaultValue="300"
+                    :justifyContent="true"
+                    :labelWidthProportionClass="'col-12 md:col-7'"
+                    :valueWidthProportionClass="'col-12 md:col-5'"
                     v-model="masStore.mas.inputs.designRequirements"
                     :valueFontSize="$styleStore.designRequirements.inputFontSize"
                     :labelFontSize="$styleStore.designRequirements.inputTitleFontSize"
@@ -517,7 +455,7 @@ export default {
                     :textColor="$styleStore.designRequirements.inputTextColor"
                 />
 
-                <MaximumDimensions class="border-bottom py-2 ps-4"
+                <MaximumDimensions class="border-bottom-1 border-solid border-300 py-2 pl-4"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.maximumDimensions != null"
                     unit="m"
@@ -534,70 +472,39 @@ export default {
                     :textColor="$styleStore.designRequirements.inputTextColor"
                 />
 
-                <!-- Terminal Type. Simple = one type for all windings (locks Wire Config); Advanced = edit per lead there. connection.type is source of truth, terminalType derived. -->
-                <div class="border-bottom py-2 ps-0 container-flex text-start"
-                    :style="$styleStore.designRequirements.inputBorderColor"
+                <ArrayElementFromList class="border-bottom-1 border-solid border-300 py-2 pl-0"
+                    :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.terminalType != null"
-                    :data-cy="dataTestLabel + '-TerminalType-container'">
-                    <div class="row align-items-center">
-                        <label
-                            class="rounded-2 fs-5 ms-3 col-12 col-sm-5"
-                            :style="combinedStyle([$styleStore.designRequirements.inputTitleFontSize, $styleStore.designRequirements.inputLabelBgColor, $styleStore.designRequirements.inputTextColor])"
-                            :class="combinedClass([$styleStore.designRequirements.inputTitleFontSize, $styleStore.designRequirements.inputLabelBgColor, $styleStore.designRequirements.inputTextColor])"
-                            :data-cy="dataTestLabel + '-TerminalType-title'">
-                            Terminal Type
-                        </label>
-                        <div class="col-12 col-sm-7 d-flex justify-content-end pe-3">
-                            <div class="btn-group btn-group-sm" role="group" aria-label="Terminal type mode">
-                                <button type="button" class="btn"
-                                    :class="terminalMode == $stateStore.MagneticBuilderModes.Basic ? 'btn-primary' : 'btn-outline-secondary'"
-                                    :data-cy="dataTestLabel + '-TerminalType-mode-simple'"
-                                    @click="setTerminalMode($stateStore.MagneticBuilderModes.Basic)">Simple</button>
-                                <button type="button" class="btn"
-                                    :class="terminalMode == $stateStore.MagneticBuilderModes.Advanced ? 'btn-primary' : 'btn-outline-secondary'"
-                                    :data-cy="dataTestLabel + '-TerminalType-mode-advanced'"
-                                    @click="setTerminalMode($stateStore.MagneticBuilderModes.Advanced)">Advanced</button>
-                            </div>
-                        </div>
-                    </div>
+                    :name="'terminalType'"
+                    :dataTestLabel="dataTestLabel + '-TerminalType'"
+                    :defaultValue="new Array(Object.keys(ConnectionType).length).fill(ConnectionType.FlyingLead)"
+                    :options="Object.values(ConnectionType)"
+                    :optionLabels="connectionTypeLabels"
+                    :titleSameRow="false"
+                    :justifyContent="false"
+                    :labelWidthProportionClass="'col-12 md:col-3'"
+                    :selectStyleClass="'col-12 md:col-4'"
+                    :fixedNumberElements="masStore.mas.inputs.designRequirements.turnsRatios.length + 1"
+                    v-model="masStore.mas.inputs.designRequirements"
+                    :valueFontSize="$styleStore.designRequirements.inputFontSize"
+                    :titleFontSize="$styleStore.designRequirements.inputTitleFontSize"
+                    :labelBgColor="$styleStore.designRequirements.inputLabelBgColor"
+                    :valueBgColor="$styleStore.designRequirements.inputValueBgColor"
+                    :textColor="$styleStore.designRequirements.inputTextColor"
+                />
 
-                    <div class="row ms-5 mt-1" v-if="terminalMode == $stateStore.MagneticBuilderModes.Basic">
-                        <div class="col-12 d-flex align-items-center gap-2">
-                            <span
-                                :style="combinedStyle([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])"
-                                :class="combinedClass([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])">All windings</span>
-                            <select
-                                class="form-select py-1 px-2"
-                                style="width: auto; max-height: 3em;"
-                                :style="combinedStyle([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputValueBgColor, $styleStore.designRequirements.inputTextColor])"
-                                :class="combinedClass([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputValueBgColor, $styleStore.designRequirements.inputTextColor])"
-                                :value="simpleTerminalType"
-                                :data-cy="dataTestLabel + '-TerminalType-select'"
-                                v-tooltip="'Terminal type applied to every winding and lead. Per-lead editing in Wire Configuration is locked while in Simple mode.'"
-                                @change="applyTerminalTypeToAll($event.target.value)">
-                                <option v-for="opt in connectionTypeValues" :key="opt" :value="opt">{{ opt }}</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="row ms-5 mt-1" v-else>
-                        <span class="col-12"
-                            :style="combinedStyle([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])"
-                            :class="combinedClass([$styleStore.designRequirements.inputFontSize, $styleStore.designRequirements.inputTextColor])"
-                            :data-cy="dataTestLabel + '-TerminalType-advanced-hint'">
-                            <i class="fa-solid fa-circle-info me-1"></i>Terminal types are edited per connection in Wire Configuration.
-                        </span>
-                    </div>
-                </div>
-
-                <ArrayElementFromList class="border-bottom py-2"
+                <ArrayElementFromList class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.isolationSides != null"
                     :name="'isolationSides'"
                     :dataTestLabel="dataTestLabel + '-IsolationSides'"
                     :defaultValue="Object.keys(IsolationSideOrdered)"
-                    :options="IsolationSideOrdered" 
-                    :titleSameRow="true"
+                    :options="IsolationSideOrdered"
+                    :optionLabels="isolationSideLabels"
+                    :titleSameRow="false"
+                    :justifyContent="false"
+                    :labelWidthProportionClass="'col-12 md:col-3'"
+                    :selectStyleClass="'col-12 md:col-4'"
                     :fixedNumberElements="masStore.mas.inputs.designRequirements.turnsRatios.length + 1"
                     v-model="masStore.mas.inputs.designRequirements"
                     :valueFontSize="$styleStore.designRequirements.inputFontSize"
@@ -608,12 +515,17 @@ export default {
                     @update="updatedIsolationSides"
                 />
 
-                <ElementFromList class="border-bottom py-2 ps-4"
+                <ElementFromList class="border-bottom-1 border-solid border-300 py-2 pl-4"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     v-if="masStore.mas.inputs.designRequirements.topology != null"
                     :name="'topology'"
                     :dataTestLabel="dataTestLabel + '-Topology'"
                     :options="Object.values(Topologies)"
+                    :optionLabels="topologyLabels"
+                    :titleSameRow="false"
+                    :justifyContent="true"
+                    :labelWidthProportionClass="'col-12 md:col-7'"
+                    :selectStyleClass="'col-12 md:col-5'"
                     v-model="masStore.mas.inputs.designRequirements"
                     :valueFontSize="$styleStore.designRequirements.inputFontSize"
                     :labelFontSize="$styleStore.designRequirements.inputTitleFontSize"
@@ -622,12 +534,17 @@ export default {
                     :textColor="$styleStore.designRequirements.inputTextColor"
                 />
 
-                <ElementFromList class="border-bottom py-2 ps-4"
+                <ElementFromList class="border-bottom-1 border-solid border-300 py-2 pl-4"
                     :style = "$styleStore.designRequirements.inputBorderColor"
                     :name="'market'"
                     v-if="masStore.mas.inputs.designRequirements.market != null"
                     :dataTestLabel="dataTestLabel + '-Market'"
                     :options="Object.values(Market)"
+                    :optionLabels="marketLabels"
+                    :titleSameRow="false"
+                    :justifyContent="true"
+                    :labelWidthProportionClass="'col-12 md:col-7'"
+                    :selectStyleClass="'col-12 md:col-5'"
                     v-model="masStore.mas.inputs.designRequirements"
                     :valueFontSize="$styleStore.designRequirements.inputFontSize"
                     :labelFontSize="$styleStore.designRequirements.inputTitleFontSize"
@@ -644,12 +561,12 @@ export default {
 
 
 <style scoped>
-/* Match Magnetic Builder's palette: primary-tinted transparent panel, var(--bs-dark) input surfaces */
+/* Match Magnetic Builder's palette: primary-tinted transparent panel, var(--p-dark) input surfaces */
 .dr-container {
-    --dr-border: rgba(var(--bs-primary-rgb), 0.15);
-    --dr-border-soft: rgba(var(--bs-primary-rgb), 0.12);
-    --dr-text: #f2f2f2;
-    --dr-text-muted: rgba(242, 242, 242, 0.7);
+    --dr-border: rgba(var(--p-primary-rgb), 0.15);
+    --dr-border-soft: rgba(var(--p-primary-rgb), 0.12);
+    --dr-text: var(--p-white);
+    --dr-text-color-secondary: rgba(var(--p-white-rgb), 0.7);
 
     padding: 0.5rem 0.75rem;
 }
@@ -660,6 +577,23 @@ export default {
     align-items: flex-start;
 }
 
+/* Mobile: stack the Requirements list and the Configuration detail
+ * panels vertically instead of side-by-side. */
+@media (max-width: 768px) {
+    .dr-layout {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .dr-list-panel {
+        width: 100% !important;
+        max-height: none !important;
+    }
+    .dr-detail-panel {
+        width: 100%;
+        max-height: none !important;
+    }
+}
+
 /* ============ Shared panel ============ */
 .dr-list-panel,
 .dr-detail-panel {
@@ -667,14 +601,14 @@ export default {
     flex-direction: column;
     background:
         linear-gradient(145deg,
-            rgba(var(--bs-primary-rgb), 0.06) 0%,
-            rgba(var(--bs-primary-rgb), 0.02) 100%),
-        var(--bs-dark);
+            rgba(var(--p-primary-rgb), 0.06) 0%,
+            rgba(var(--p-primary-rgb), 0.02) 100%),
+        var(--p-dark);
     border: 1px solid var(--dr-border);
     border-radius: 14px;
     box-shadow:
-        0 4px 20px rgba(0, 0, 0, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        0 4px 20px rgba(var(--p-black-rgb), 0.12),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -695,9 +629,9 @@ export default {
     align-items: center;
     gap: 0.5rem;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
+    background: rgba(var(--p-primary-rgb), 0.1);
     border-bottom: 1px solid var(--dr-border-soft);
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.95rem;
     letter-spacing: 0.02em;
@@ -706,7 +640,7 @@ export default {
 
 .dr-panel-header i {
     font-size: 1rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.45));
 }
 
 .dr-list-body {
@@ -721,12 +655,11 @@ export default {
     flex: 1;
 }
 
-/* Neutralise Bootstrap border-top/border-bottom on the form rows and
-   draw a single clean divider between sections instead, so there are no
-   "dark holes" between them. */
+/* Neutralise borders on the form rows and draw a single clean divider
+   between sections instead, so there are no "dark holes" between them. */
 .dr-detail-body :deep(> *) {
-    border-top: 0 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border: 0 !important;
+    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.06) !important;
     padding: 0.55rem 0.85rem !important;
     background: transparent !important;
 }
@@ -736,7 +669,58 @@ export default {
 }
 
 .dr-detail-body :deep(> *:hover) {
-    background: rgba(255, 255, 255, 0.025) !important;
+    background: rgba(var(--p-white-rgb), 0.025) !important;
+}
+
+/* Stack the title row above the input row only for TOP-LEVEL
+   requirement components (direct children of .dr-detail-body). Nested
+   Dimension instances (e.g. Frequency / Impedance inside Impedances)
+   keep the default same-row label-then-value layout. */
+.dr-detail-body > .efl-container :deep(.efl-row),
+.dr-detail-body > .dim-container :deep(.dim-row),
+.dr-detail-body > .efr-container :deep(.efr-row),
+.dr-detail-body > .efr-container :deep(.efr-options-row-inline) {
+    flex-direction: column !important;
+    align-items: stretch !important;
+}
+/* Top-level requirement labels (Number Windings, Magnetizing Inductance,
+   Wiring Technology, etc.) need full width to live on their own row
+   above the input. The bold-teal styling itself comes from custom.scss. */
+.dr-detail-body > .efl-container > .efl-row > .efl-label,
+.dr-detail-body > .dim-container > .dim-row > .dim-label,
+.dr-detail-body > .efr-container > .efr-row > .efr-label,
+.dr-detail-body > .dwt-container > .dwt-title-row > .dwt-title {
+    text-align: left !important;
+    width: 100% !important;
+    margin-bottom: 0.35rem !important;
+}
+
+/* Stop the unit Select from stretching when its parent row isn't a
+   `justify-content: space-between` flex. */
+.dr-detail-body :deep(.efl-row .efl-select[class*="md:col-"]) {
+    flex: 0 0 auto !important;
+}
+
+/* ArrayDimensionWithTolerance per-winding rows (Leakage Inductance,
+   Stray Capacitance, Turns Ratios): the winding name (Secondary,
+   Tertiary, ...) sits on the LEFT and the tolerance InputGroup on the
+   RIGHT — same row. */
+.dr-detail-body :deep(.dwt-container.array-dwt-row) {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 0.75rem !important;
+    padding-left: 1.5rem !important;   /* small indent under the section title */
+    padding-right: 0 !important;
+    margin: 0 !important;
+}
+.dr-detail-body :deep(.dwt-container.array-dwt-row > .dwt-title-row) {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 5rem;
+}
+.dr-detail-body :deep(.dwt-container.array-dwt-row > .dwt-fields-row) {
+    flex: 1 1 auto !important;
+    min-width: 0;
 }
 
 /* ============ Requirement list item ============ */
@@ -749,7 +733,7 @@ export default {
     margin: 0;
     background: transparent;
     border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.05);
     border-radius: 0;
     transition: background 0.15s;
 }
@@ -759,15 +743,15 @@ export default {
 }
 
 .dr-req-item:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--p-white-rgb), 0.03);
 }
 
 .dr-req-item-active {
-    background: rgba(var(--bs-primary-rgb), 0.05);
+    background: rgba(var(--p-primary-rgb), 0.05);
 }
 
 .dr-req-item-active:hover {
-    background: rgba(var(--bs-primary-rgb), 0.09);
+    background: rgba(var(--p-primary-rgb), 0.09);
 }
 
 .dr-req-item-required {
@@ -817,33 +801,33 @@ export default {
 
 .dr-btn-add {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: #ffffff;
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, #ffffff 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.3),
-        0 2px 6px rgb(var(--bs-primary-rgb) / 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.3),
+        0 2px 6px rgb(var(--p-primary-rgb) / 0.35),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.25);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .dr-btn-remove {
-    background: rgb(var(--bs-danger-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-danger-rgb) / 0.6);
-    color: var(--bs-danger);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: rgb(var(--p-danger-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.6);
+    color: var(--p-danger);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
 }
 
 .dr-btn-remove:hover:not(:disabled) {
-    background: rgb(var(--bs-danger-rgb) / 0.3);
-    border-color: rgb(var(--bs-danger-rgb) / 0.8);
+    background: rgb(var(--p-danger-rgb) / 0.3);
+    border-color: rgb(var(--p-danger-rgb) / 0.8);
 }
 
 .dr-btn-required {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    color: rgba(255, 255, 255, 0.55);
+    background: rgba(var(--p-white-rgb), 0.06);
+    border: 1px solid rgba(var(--p-white-rgb), 0.18);
+    color: rgba(var(--p-white-rgb), 0.55);
 }
 </style>

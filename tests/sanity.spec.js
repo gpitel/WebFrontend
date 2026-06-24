@@ -1,10 +1,11 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './_coverage.js';
 
-const BASE_URL = 'http://localhost:5174';
+import { tryWaitForURL, pause, tryWaitForSelector } from './utils/wait.js';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
 async function openDabWizard(page) {
   await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 20000 });
-  await page.waitForTimeout(1000);
+  await pause(page, 1000, 'mechanical: settle');
   const clicked = await page.evaluate(() => {
     const toggles = Array.from(document.querySelectorAll('.dropdown-toggle'));
     const wizardsToggle = toggles.find(el => el.textContent.includes('Wizards'));
@@ -18,9 +19,11 @@ async function openDabWizard(page) {
     if (dabLink) { dabLink.click(); return true; }
     return false;
   });
-  await page.waitForURL('**/wizards', { timeout: 15000 }).catch(() => {});
-  await page.waitForSelector('.sim-btn.analytical', { timeout: 15000 }).catch(() => {});
-  await page.waitForTimeout(300);
+  // Cold contexts route through /engine_loader (WASM init takes 30-90s);
+  // match openWizard's 120s budget instead of soft-timing-out at 15s.
+  await tryWaitForURL(page, '**/wizards', 120000);
+  await tryWaitForSelector(page,'.sim-btn.analytical', { timeout: 30000 });
+  await pause(page, 300, 'mechanical: settle');
 }
 
 test('sanity', async ({ page }) => {

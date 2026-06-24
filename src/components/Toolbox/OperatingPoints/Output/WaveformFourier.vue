@@ -2,9 +2,9 @@
 import { useMasStore } from '../../../../stores/mas'
 import { useTaskQueueStore } from '../../../../stores/taskQueue'
 import { Chart, registerables } from 'chart.js'
-import { formatCurrent, removeTrailingZeroes, formatFrequency, formatVoltage } from '/WebSharedComponents/assets/js/utils.js'
-import { defaultSamplingNumberPoints, defaultMaximumNumberHarmonicsShown } from '/WebSharedComponents/assets/js/defaults.js'
-import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { formatCurrent, removeTrailingZeroes, formatFrequency, formatVoltage } from 'WebSharedComponents/assets/js/utils.js'
+import { defaultSamplingNumberPoints, defaultMaximumNumberHarmonicsShown } from 'WebSharedComponents/assets/js/defaults.js'
+import { deepCopy } from 'WebSharedComponents/assets/js/utils.js'
 </script>
 
 <script>
@@ -123,10 +123,10 @@ export default {
                     }
                 },
                 tooltip: {
-                    backgroundColor: 'rgba(20, 20, 20, 0.92)',
-                    titleColor: '#f2f2f2',
-                    bodyColor: '#f2f2f2',
-                    borderColor: 'rgba(var(--bs-primary-rgb), 0.6)',
+                    backgroundColor: 'rgba(var(--p-dark-rgb), 0.92)',
+                    titleColor: 'var(--p-light)',
+                    bodyColor: 'var(--p-light)',
+                    borderColor: 'rgba(var(--p-primary-rgb), 0.6)',
                     borderWidth: 1,
                     padding: 8,
                     cornerRadius: 6,
@@ -181,7 +181,7 @@ export default {
                         padding: 4,
                     },
                     grid: {
-                        color: 'rgba(177, 138, 234, 0.12)',
+                        color: 'rgba(255, 185, 78, 0.18)',
                         drawBorder: false,
                         lineWidth: 1,
                     },
@@ -202,7 +202,7 @@ export default {
                 },
                 x: {
                     ticks: {
-                        color: 'rgba(242, 242, 242, 0.7)',
+                        color: 'rgba(212, 212, 212, 0.9)',
                         font: { size: 10, weight: '500' },
                         padding: 4,
                         maxRotation: 0,
@@ -222,12 +222,12 @@ export default {
                         }
                     },
                     grid: {
-                        color: 'rgba(255, 255, 255, 0.05)',
+                        color: 'rgba(212, 212, 212, 0.08)',
                         drawBorder: false,
                         lineWidth: 1,
                     },
                     border: {
-                        color: 'rgba(255, 255, 255, 0.15)',
+                        color: 'rgba(212, 212, 212, 0.25)',
                     },
                 }
             },
@@ -439,7 +439,7 @@ export default {
         <div v-if="hiddenHarmonicsCount > 0"
              class="wf-hint"
              v-tooltip="`${hiddenHarmonicsCount} more harmonic${hiddenHarmonicsCount === 1 ? '' : 's'} above threshold not shown — raise the &quot;Max harmonics to plot&quot; limit in Operating point settings`">
-            <i class="fa-solid fa-circle-info"></i>
+            <i class="pi pi-info-circle"></i>
             <span>+{{ hiddenHarmonicsCount }}</span>
         </div>
     </div>
@@ -463,10 +463,10 @@ export default {
     font-size: 0.68rem;
     font-weight: 600;
     line-height: 1;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     padding: 0.18rem 0.5rem;
-    background: rgba(var(--bs-primary-rgb), 0.18);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.45);
+    background: rgba(var(--p-primary-rgb), 0.18);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.45);
     border-radius: 999px;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);

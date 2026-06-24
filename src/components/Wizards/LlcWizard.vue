@@ -1,14 +1,17 @@
 <script setup>
+import { InsulationType, IsolationSide, Topologies } from 'WebSharedComponents/assets/ts/MAS.ts'
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
-import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import PairOfDimensions from '/WebSharedComponents/DataInput/PairOfDimensions.vue'
-import { minimumMaximumScalePerParameter, defaultDesignRequirements } from '/WebSharedComponents/assets/js/defaults.js'
+import { deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import DimensionReadOnly from 'WebSharedComponents/DataInput/DimensionReadOnly.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import PairOfDimensions from 'WebSharedComponents/DataInput/PairOfDimensions.vue'
+import { minimumMaximumScalePerParameter, defaultDesignRequirements } from 'WebSharedComponents/assets/js/defaults.js'
 import ConverterWizardBase from './ConverterWizardBase.vue'
+import CompactVoltageInput from './CompactVoltageInput.vue'
+import { tooltipsConverterWizards, dropdownLabelsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
 
 <script>
@@ -36,24 +39,28 @@ export default {
             qualityFactor: 0.4,
             inductanceRatio: 5,
             integratedResonantInductor: true,
+            rectifierType: 'fullBridge',
             magnetizingInductance: 825e-6,
             turnsRatio: 8.33,
             ambientTemperature: 25,
             efficiency: 0.97,
-            insulationType: 'Basic',
+            insulationType: InsulationType.Basic,
             designMode: designLevelOptions[0],  // Default to "Help me with the design"
             overrideSeriesInductance: false,
             seriesInductance: 40e-6,
             overrideResonantCapacitance: false,
             resonantCapacitance: 63e-9,
         };
-        const insulationTypes = ['No', 'Basic', 'Reinforced'];
+        const insulationTypes = ['no', 'basic', 'reinforced'];
+        const rectifierOptions = ['fullBridge', 'centerTapped', 'currentDoubler', 'voltageDoubler'];
         return {
             masStore,
             taskQueueStore,
             designLevelOptions,
             localData,
             insulationTypes,
+            rectifierOptions,
+            dropdownLabelsConverterWizards,
             errorMessage: "",
             simulatingWaveforms: false,
             waveformSource: '',
@@ -83,21 +90,32 @@ export default {
             });
         },
     },
+    mounted() {
+        this.$nextTick(() => {
+            if (this._autoRunDone) return;
+            this._autoRunDone = true;
+            try { this.updateErrorMessage?.(); } catch (e) { return; }
+            if (!this.errorMessage) this.simulateIdealWaveforms?.();
+        });
+    },
     methods: {
 
     // ===== WIZARD CONTRACT =====
     buildParams(mode) {
       const opFreq = this.localData.operatingSwitchingFrequency || this.localData.resonantFrequency;
       const outs = this.localData.outputsParameters || [];
+      const bridgeMap = { 'Full Bridge': 'fullBridge', 'Half Bridge': 'halfBridge', 'fullBridge': 'fullBridge', 'halfBridge': 'halfBridge' };
+      const bridgeRaw = this.localData.bridgeType || 'Half Bridge';
       const aux = {
         inputVoltage: this.localData.inputVoltage,
-        bridgeType: this.localData.bridgeType || 'Half Bridge',
+        bridgeType: bridgeMap[bridgeRaw] || 'halfBridge',
         minSwitchingFrequency: this.localData.minSwitchingFrequency,
         maxSwitchingFrequency: this.localData.maxSwitchingFrequency,
         resonantFrequency: this.localData.resonantFrequency,
         qualityFactor: this.localData.qualityFactor,
         inductanceRatio: this.localData.inductanceRatio,
         integratedResonantInductor: this.localData.integratedResonantInductor,
+        rectifierType: this.localData.rectifierType,
         operatingPoints: [{
           outputVoltages: outs.map(o => o.voltage),
           outputCurrents: outs.map(o => (o.voltage > 0 ? o.power / o.voltage : 0)),
@@ -106,7 +124,10 @@ export default {
         }],
       };
       if (this.localData.designMode === 'I know the design I want') {
-        aux.desiredInductance = this.localData.magnetizingInductance;
+        // Backend key is desiredMagnetizingInductance (AdvancedLlc::from_json,
+        // Llc.h:306-309). The legacy `desiredInductance` name was silently
+        // dropped by the JSON parser.
+        aux.desiredMagnetizingInductance = this.localData.magnetizingInductance;
         aux.desiredTurnsRatios = [this.localData.turnsRatio];
       }
       if (this.localData.overrideSeriesInductance && this.localData.seriesInductance > 0) {
@@ -172,7 +193,7 @@ export default {
         },
         
         getTopology() {
-            return 'LLC Resonant Converter';
+            return Topologies.LlcResonantConverter;
         },
         
         getIsolationSides() {
@@ -180,8 +201,8 @@ export default {
             // Each output's two halves share the same isolation side so the
             // coil virtualization can wind them together on a single section.
             // Side labels: primary, secondary (output 0), tertiary (output 1), ...
-            const sideAt = (i) => ['primary','secondary','tertiary','quaternary','quinary','senary','septenary','octonary','nonary','denary'][i] || ('winding' + i);
-            const sides = ['primary'];
+            const sideAt = (i) => [IsolationSide.Primary, IsolationSide.Secondary, IsolationSide.Tertiary, IsolationSide.Quaternary, IsolationSide.Quinary, IsolationSide.Senary, IsolationSide.Septenary, IsolationSide.Octonary, IsolationSide.Nonary, IsolationSide.Denary][i] || ('winding' + i);
+            const sides = [IsolationSide.Primary];
             const numOutputs = (this.localData.outputsParameters || []).length || 1;
             for (let i = 0; i < numOutputs; i++) {
                 sides.push(sideAt(i + 1));
@@ -316,7 +337,7 @@ export default {
   <ConverterWizardBase
     ref="base"
     title="LLC Wizard"
-    titleIcon="fa-wave-square"
+    titleIcon="pi pi-volume-up"
     :subtitle="wizardSubtitle"
     :col1Width="3" :col2Width="4" :col3Width="5"
     :showNumberOutputs="false"
@@ -349,78 +370,112 @@ export default {
     </template>
 
     <template #design-or-switch-parameters-title>
-      <div class="compact-header"><i class="fa-solid fa-cogs me-1"></i>Tank</div>
+      <div class="compact-header"><i class="pi pi-cog-wide-connected mr-1"></i>Tank</div>
     </template>
 
     <template #design-or-switch-parameters>
-      <Dimension :name="'qualityFactor'" :replaceTitle="'Q Factor'" :unit="null" :min="0.1" :max="2" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <Dimension :name="'inductanceRatio'" :replaceTitle="'Ln Ratio'" :unit="null" :min="2" :max="20" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
+      <Dimension :name="'qualityFactor'" :tooltip="tooltipsConverterWizards['qualityFactor']" :replaceTitle="'Q Factor'" :unit="null" :min="0.1" :max="2" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-QualityFactor'" />
+      <Dimension :name="'inductanceRatio'" :tooltip="tooltipsConverterWizards['inductanceRatio']" :replaceTitle="'Ln Ratio'" :unit="null" :min="2" :max="20" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-InductanceRatio'" />
       <!-- Only show turns ratio and magnetizing inductance inputs in "I know the design I want" mode -->
       <template v-if="localData.designMode === 'I know the design I want'">
-        <Dimension :name="'turnsRatio'" :replaceTitle="'Turns'" :unit="null" :min="0.1" :max="100" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-        <Dimension :name="'magnetizingInductance'" :replaceTitle="'Mag. Inductance'" unit="H" :min="minimumMaximumScalePerParameter['inductance']['min']" :max="minimumMaximumScalePerParameter['inductance']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
+        <Dimension :name="'turnsRatio'" :tooltip="tooltipsConverterWizards['turnsRatio']" :replaceTitle="'Turns'" :unit="null" :min="0.1" :max="100" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-TurnsRatio'" />
+        <Dimension :name="'magnetizingInductance'" :tooltip="tooltipsConverterWizards['magnetizingInductance']" :replaceTitle="'Mag. Inductance'" unit="H" :min="minimumMaximumScalePerParameter['inductance']['min']" :max="minimumMaximumScalePerParameter['inductance']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-MagnetizingInductance'" />
       </template>
       <!-- Show computed values using DimensionReadOnly (shows only when data available) -->
       <template v-else-if="hasComputedTankValues()">
-        <DimensionReadOnly :name="'turnsRatio'" :replaceTitle="'Number Turns'" :unit="null" :value="getComputedTurnsRatio()" :numberDecimals="2" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-        <DimensionReadOnly :name="'magnetizingInductance'" :replaceTitle="'Mag. Inductance'" unit="H" :value="getComputedMagnetizingInductance()" :numberDecimals="6" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
+        <DimensionReadOnly :name="'turnsRatio'" :tooltip="tooltipsConverterWizards['turnsRatio']" :replaceTitle="'Number Turns'" :unit="null" :value="getComputedTurnsRatio()" :numberDecimals="2" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-TurnsRatio'" />
+        <DimensionReadOnly :name="'magnetizingInductance'" :tooltip="tooltipsConverterWizards['magnetizingInductance']" :replaceTitle="'Mag. Inductance'" unit="H" :value="getComputedMagnetizingInductance()" :numberDecimals="6" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-MagnetizingInductance'" />
       </template>
-      <div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="localData.integratedResonantInductor" id="integratedResonantInductor"><label class="form-check-label small" for="integratedResonantInductor" :style="{ color: $styleStore.wizard.inputTextColor }">Integrated Res L</label></div>
+      <div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="localData.integratedResonantInductor" id="integratedResonantInductorLlc"><label class="form-check-label small" for="integratedResonantInductorLlc" :style="{ color: $styleStore.wizard.inputTextColor }">Integrated Res L</label></div>
+      <ElementFromList :name="'rectifierType'" :tooltip="tooltipsConverterWizards['rectifierType']" :replaceTitle="'Rectifier'" :options="rectifierOptions" :optionLabels="dropdownLabelsConverterWizards.rectifierType" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-RectifierType'" />
 
       <!-- Ls / Cr overrides: bypass the automatic Q-based tank design. -->
-      <div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="localData.overrideSeriesInductance" id="overrideSeriesInductance" @change="updateErrorMessage"><label class="form-check-label small" for="overrideSeriesInductance" :style="{ color: $styleStore.wizard.inputTextColor }">Override Ls</label></div>
-      <Dimension v-if="localData.overrideSeriesInductance" :name="'seriesInductance'" :replaceTitle="'Ls'" unit="H" :min="minimumMaximumScalePerParameter['inductance']['min']" :max="minimumMaximumScalePerParameter['inductance']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="localData.overrideResonantCapacitance" id="overrideResonantCapacitance" @change="updateErrorMessage"><label class="form-check-label small" for="overrideResonantCapacitance" :style="{ color: $styleStore.wizard.inputTextColor }">Override Cr</label></div>
-      <Dimension v-if="localData.overrideResonantCapacitance" :name="'resonantCapacitance'" :replaceTitle="'Cr'" unit="F" :min="1e-12" :max="1e-3" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
+      <div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="localData.overrideSeriesInductance" id="overrideSeriesInductanceLlc" @change="updateErrorMessage"><label class="form-check-label small" for="overrideSeriesInductanceLlc" :style="{ color: $styleStore.wizard.inputTextColor }">Override Ls</label></div>
+      <Dimension v-if="localData.overrideSeriesInductance" :name="'seriesInductance'" :tooltip="tooltipsConverterWizards['seriesInductance']" :replaceTitle="'Series Ind.'" unit="H" :min="minimumMaximumScalePerParameter['inductance']['min']" :max="minimumMaximumScalePerParameter['inductance']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-SeriesInductance'" />
+      <div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="localData.overrideResonantCapacitance" id="overrideResonantCapacitanceLlc" @change="updateErrorMessage"><label class="form-check-label small" for="overrideResonantCapacitanceLlc" :style="{ color: $styleStore.wizard.inputTextColor }">Override Cr</label></div>
+      <Dimension v-if="localData.overrideResonantCapacitance" :name="'resonantCapacitance'" :tooltip="tooltipsConverterWizards['resonantCapacitance']" :replaceTitle="'Resonant Cap.'" unit="F" :min="1e-12" :max="1e-3" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-ResonantCapacitance'" />
     </template>
 
     <!-- Diagnostics slot: rendered by ConverterWizardBase as a generic .compact-card. -->
     <template v-if="llcDiagnostics" #diagnostics>
-      <DimensionReadOnly :name="'llcMode'" :replaceTitle="'Mode'" :unit="null" :value="llcModeLabel(llcDiagnostics.lastMode)" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly :name="'llcLs'" :replaceTitle="'Ls'" unit="H" :value="llcDiagnostics.computedResonantInductance" :numberDecimals="6" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly :name="'llcCr'" :replaceTitle="'Cr'" unit="F" :value="llcDiagnostics.computedResonantCapacitance" :numberDecimals="9" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly :name="'llcLn'" :replaceTitle="'Ln'" :unit="null" :value="llcDiagnostics.computedInductanceRatio" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly :name="'llcLipFreq'" :replaceTitle="'LIP freq'" unit="Hz" :value="llcDiagnostics.lipFrequency" :numberDecimals="0" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly :name="'llcLipVin'" :replaceTitle="'LIP Vin'" unit="V" :value="llcDiagnostics.lipInputVoltage" :numberDecimals="1" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly :name="'llcResidual'" :replaceTitle="'Residual'" :unit="null" :value="llcDiagnostics.lastSteadyStateResidual" :numberDecimals="6" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="llcDiagnostics.lastSteadyStateResidual > 1e-4 ? 'text-warning' : $styleStore.wizard.inputTextColor"/>
-      <DimensionReadOnly v-if="llcDiagnostics.lastSubStateSequence && llcDiagnostics.lastSubStateSequence.length" :name="'llcSubStates'" :replaceTitle="'Sub-states'" :unit="null" :value="llcDiagnostics.lastSubStateSequence.join(' → ')" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor"/>
+      <!-- Session/computed tank values are single-design; always single column. -->
+      <DimensionReadOnly :name="'llcLs'" :tooltip="tooltipsConverterWizards['llcLs']" :replaceTitle="'Series Ind.'" unit="H" :value="llcDiagnostics.computedResonantInductance" :numberDecimals="6" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcLs'" />
+      <DimensionReadOnly :name="'llcCr'" :tooltip="tooltipsConverterWizards['llcCr']" :replaceTitle="'Resonant Cap.'" unit="F" :value="llcDiagnostics.computedResonantCapacitance" :numberDecimals="9" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcCr'" />
+      <DimensionReadOnly :name="'llcLn'" :tooltip="tooltipsConverterWizards['llcLn']" :replaceTitle="'Ln'" :unit="null" :value="llcDiagnostics.computedInductanceRatio" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcLn'" />
+      <DimensionReadOnly :name="'llcLipFreq'" :tooltip="tooltipsConverterWizards['llcLipFreq']" :replaceTitle="'LIP freq'" unit="Hz" :value="llcDiagnostics.lipFrequency" :numberDecimals="0" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcLipFreq'" />
+      <DimensionReadOnly :name="'llcLipVin'" :tooltip="tooltipsConverterWizards['llcLipVin']" :replaceTitle="'LIP Vin'" unit="V" :value="llcDiagnostics.lipInputVoltage" :numberDecimals="1" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcLipVin'" />
+      <DimensionReadOnly v-if="llcDiagnostics.lastSubStateSequence && llcDiagnostics.lastSubStateSequence.length" :name="'llcSubStates'" :tooltip="tooltipsConverterWizards['llcSubStates']" :replaceTitle="'Sub-states'" :unit="null" :value="llcDiagnostics.lastSubStateSequence.join(' → ')" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcSubStates'" />
+
+      <!-- Per-OP table for the last_* fields that vary across V_in. -->
+      <table
+        v-if="Array.isArray(llcDiagnostics.perOp) && llcDiagnostics.perOp.length > 1"
+        class="diagnostics-perop-table"
+        :data-cy="dataTestLabel + '-Llc-perOp-table'"
+        :style="{ color: $styleStore.wizard.inputTextColor, fontSize: $styleStore.wizard.inputFontSize, width: '100%', borderCollapse: 'collapse', marginTop: '4px' }"
+      >
+        <thead>
+          <tr>
+            <th :style="{ textAlign: 'left', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }"></th>
+            <th v-for="(op, i) in llcDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }">
+              {{ op.operatingPointName || ('OP ' + i) }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Mode</td><td v-for="(op, i) in llcDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ llcModeLabel(op.lastMode) }}</td></tr>
+          <tr><td>Residual</td><td v-for="(op, i) in llcDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px', color: op.steadyStateResidual > 1e-4 ? 'var(--p-warning)' : 'inherit' }">{{ Number(op.steadyStateResidual).toExponential(2) }}</td></tr>
+          <tr><td>ZVS margin (A)</td><td v-for="(op, i) in llcDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.zvsMarginLagging).toFixed(3) }}</td></tr>
+          <tr><td>I_pri peak (A)</td><td v-for="(op, i) in llcDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.primaryPeakCurrent).toFixed(3) }}</td></tr>
+        </tbody>
+      </table>
+      <template v-else>
+        <DimensionReadOnly :name="'llcMode'" :tooltip="tooltipsConverterWizards['llcMode']" :replaceTitle="'Mode'" :unit="null" :value="llcModeLabel(llcDiagnostics.lastMode)" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcMode'" />
+        <DimensionReadOnly :name="'llcResidual'" :tooltip="tooltipsConverterWizards['llcResidual']" :replaceTitle="'Residual'" :unit="null" :value="llcDiagnostics.lastSteadyStateResidual" :numberDecimals="6" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="llcDiagnostics.lastSteadyStateResidual > 1e-4 ? 'text-warning' : $styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-LlcResidual'" />
+      </template>
     </template>
 
     <template #conditions>
       <!-- Freq Range -->
-      <Dimension :name="'minSwitchingFrequency'" :replaceTitle="'Min. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <Dimension :name="'maxSwitchingFrequency'" :replaceTitle="'Max. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <Dimension :name="'resonantFrequency'" :replaceTitle="'Res. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <Dimension :name="'operatingSwitchingFrequency'" :replaceTitle="'Op. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <Dimension :name="'ambientTemperature'" :replaceTitle="'Temperature'" unit=" C" :min="minimumMaximumScalePerParameter['temperature']['min']" :max="minimumMaximumScalePerParameter['temperature']['max']" :allowNegative="true" :allowZero="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <Dimension :name="'efficiency'" :replaceTitle="'Efficiency'" unit="%" :visualScale="100" :min="0.5" :max="1" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
-      <ElementFromList :name="'insulationType'" :replaceTitle="'Insulation'" :options="insulationTypes" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
+      <Dimension :name="'minSwitchingFrequency'" :tooltip="tooltipsConverterWizards['minSwitchingFrequency']" :replaceTitle="'Min. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-MinSwitchingFrequency'" />
+      <Dimension :name="'maxSwitchingFrequency'" :tooltip="tooltipsConverterWizards['maxSwitchingFrequency']" :replaceTitle="'Max. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-MaxSwitchingFrequency'" />
+      <Dimension :name="'resonantFrequency'" :tooltip="tooltipsConverterWizards['resonantFrequency']" :replaceTitle="'Res. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-ResonantFrequency'" />
+      <Dimension :name="'operatingSwitchingFrequency'" :tooltip="tooltipsConverterWizards['operatingSwitchingFrequency']" :replaceTitle="'Op. Frequency'" unit="Hz" :min="minimumMaximumScalePerParameter['frequency']['min']" :max="minimumMaximumScalePerParameter['frequency']['max']" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-OperatingSwitchingFrequency'" />
+      <Dimension :name="'ambientTemperature'" :tooltip="tooltipsConverterWizards['ambientTemperature']" :replaceTitle="'Temperature'" unit=" C" :min="minimumMaximumScalePerParameter['temperature']['min']" :max="minimumMaximumScalePerParameter['temperature']['max']" :allowNegative="true" :allowZero="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-AmbientTemperature'" />
+      <Dimension :name="'efficiency'" :tooltip="tooltipsConverterWizards['efficiency']" :replaceTitle="'Efficiency'" unit="%" :visualScale="100" :min="0.5" :max="1" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-Efficiency'" />
+      <ElementFromList :name="'insulationType'" :tooltip="tooltipsConverterWizards['insulationType']" :replaceTitle="'Insulation'" :options="insulationTypes" :optionLabels="dropdownLabelsConverterWizards.insulationType" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-InsulationType'" />
       <!-- Bridge Type -->
-      <ElementFromList :name="'bridgeType'" :replaceTitle="'Bridge Type'" :options="['Half Bridge', 'Full Bridge']" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
+      <ElementFromList :name="'bridgeType'" :tooltip="tooltipsConverterWizards['bridgeType']" :replaceTitle="'Bridge Type'" :options="['Half Bridge', 'Full Bridge']" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage" :dataTestLabel="dataTestLabel + '-BridgeType'" />
     </template>
 
     <template #col1-footer>
       <div class="d-flex align-items-center justify-content-between mt-2">
-        <span v-if="errorMessage" class="error-text"><i class="fa-solid fa-exclamation-triangle me-1"></i>{{ errorMessage }}</span>
+        <span v-if="errorMessage" class="error-text"><i class="pi pi-exclamation-triangle mr-1"></i>{{ errorMessage }}</span>
         <span v-else></span>
         <div class="action-btns">
-          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="fa-solid fa-magnifying-glass me-1"></i>Review Specs</button>
-          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Design Magnetic</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="pi pi-search mr-1"></i>Review Specs</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="pi pi-sparkles mr-1"></i>Design Magnetic</button>
         </div>
       </div>
     </template>
-
     <template #input-voltage>
-      <DimensionWithTolerance :name="'inputVoltage'" :replaceTitle="''" unit="V" :min="minimumMaximumScalePerParameter['voltage']['min']" :max="minimumMaximumScalePerParameter['voltage']['max']" :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-4'" v-model="localData.inputVoltage" :severalRows="true" :addButtonStyle="$styleStore.wizard.addButton" :removeButtonBgColor="$styleStore.wizard.removeButton['background-color']" :titleFontSize="$styleStore.wizard.inputLabelFontSize" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateErrorMessage"/>
+      <CompactVoltageInput
+        :name="'inputVoltage'"
+        :tooltip="tooltipsConverterWizards['inputVoltage']"
+        :dataTestLabel="dataTestLabel + '-InputVoltage'"
+        unit="V"
+        :modelValue="localData.inputVoltage"
+        @update="updateErrorMessage"
+      />
     </template>
 
     <template #outputs>
       <div class="mb-2">
-        <ElementFromList :name="'numberOutputs'" :replaceTitle="'Number of Outputs'" :options="Array.from({length: 10}, (_, i) => i + 1)" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateNumberOutputs"/>
+        <ElementFromList :name="'numberOutputs'" :tooltip="tooltipsConverterWizards['numberOutputs']" :replaceTitle="'Number of Outputs'" :options="Array.from({length: 10}, (_, i) => i + 1)" :titleSameRow="true" v-model="localData" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor" :textColor="$styleStore.wizard.inputTextColor" @update="updateNumberOutputs" :dataTestLabel="dataTestLabel + '-NumberOutputs'" />
       </div>
       <div v-for="(datum, index) in localData.outputsParameters" :key="'llc-output-' + index" class="mb-2">
         <PairOfDimensions
           :names="['voltage', 'power']"
+          :dataTestLabel="dataTestLabel + '-OutputsParameters-' + index"
           :replaceTitle="['V' + (index + 1), 'P' + (index + 1)]"
           :units="['V', 'W']"
           :mins="[minimumMaximumScalePerParameter['voltage']['min'], 1]"

@@ -1,7 +1,8 @@
 <script setup>
 import { useMasStore } from '../../../stores/mas'
-import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
+import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from 'WebSharedComponents/assets/js/utils.js'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import { isolationSideOrdered } from 'WebSharedComponents/assets/js/defaults.js'
 </script>
 
 <script>
@@ -47,11 +48,11 @@ export default {
         },
         valueFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         titleFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         labelBgColor: {
             type: [String, Object],
@@ -64,6 +65,22 @@ export default {
         textColor: {
             type: [String, Object],
             default: "text-white",
+        },
+        optionLabels: {
+            type: Object,
+            default: null,
+        },
+        labelWidthProportionClass: {
+            type: String,
+            default: '',
+        },
+        selectStyleClass: {
+            type: String,
+            default: '',
+        },
+        justifyContent: {
+            type: Boolean,
+            default: false,
         },
     },
     data() {
@@ -119,31 +136,36 @@ export default {
 </script>
 
 <template>
-    <div :data-cy="dataTestLabel + '-container'" class="container-flex border-bottom">
-        <div class="row">
+    <div :data-cy="dataTestLabel + '-container'" class="container-flex border-bottom-1 border-solid border-300">
+        <div class="grid">
             <label
                 :style="combinedStyle([titleFontSize, labelBgColor, textColor])"
                 :data-cy="dataTestLabel + '-title'"
-                class="rounded-2 fs-5 ms-3"
-                :class="combinedClass([maximumNumberElements != null? 'col-sm-6 col-md-3' : 'col-12', titleFontSize, labelBgColor, textColor])"
+                class="rounded-2 ml-3"
+                :class="combinedClass([maximumNumberElements != null? 'col-6 md:col-3' : 'col-12', titleFontSize, labelBgColor, textColor])"
             >
                 {{toTitleCase(name)}}
             </label>
         </div>
-        <div class="row ms-5">
+        <div class="grid ml-5">
             <ElementFromList
                 :data-cy="dataTestLabel + '-' + (requirementIndex) + '-container'"
                 :dataTestLabel="dataTestLabel + '-' + (requirementIndex - 1)"
                 :min="min"
                 :max="max"
-                :titleSameRow="titleSameRow"
+                :titleSameRow="true"
+                :justifyContent="justifyContent"
                 v-for="requirementIndex in masStore.mas.inputs.designRequirements[name].length"
+                :key="requirementIndex"
                 :defaultValue="defaultValue[requirementIndex - 1]"
                 class="py-2 col-12"
                 :name="requirementIndex - 1"
                 v-model="masStore.mas.inputs.designRequirements[name]"
                 :options="options"
-                :replaceTitle="'Winding ' + requirementIndex"
+                :optionLabels="optionLabels"
+                :replaceTitle="isolationSideOrdered[requirementIndex - 1]"
+                :labelWidthProportionClass="labelWidthProportionClass"
+                :selectStyleClass="selectStyleClass"
                 :labelFontSize='valueFontSize'
                 :valueFontSize='valueFontSize'
                 :labelBgColor='labelBgColor'
@@ -153,8 +175,8 @@ export default {
                 @update="update($event, requirementIndex - 1)"
             />
         </div>
-        <div class="row">
-            <label class="text-danger text-center col-12 pt-1" style="font-size: 0.9em; white-space: pre-wrap;">{{errorMessages}}</label>
+        <div class="grid">
+            <label class="text-red-500 text-center col-12 pt-1" style="font-size: 0.9em; white-space: pre-wrap;">{{errorMessages}}</label>
         </div>
     </div>
 </template>

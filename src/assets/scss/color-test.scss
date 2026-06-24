@@ -1,0 +1,76 @@
+/*
+ * Color-purity test stylesheet.
+ *
+ * Activated by appending ?colortest=1 to any URL (see main.js).
+ *
+ * Forces every --p-* CSS variable to white. Anything that's still
+ * visibly NOT white is reading a hardcoded color from somewhere outside
+ * the --p-* token system. That's a bug we want to catch.
+ *
+ * Intentional exceptions (these will remain colored even with the test on,
+ * and that is correct):
+ *   - 3D scene materials  (Magnetic3DVisualizer, Core3DVisualizer)
+ *   - CAD line defaults    (mvbRuntime, mvbWorker, Core2DVisualizer fallbacks)
+ *   - @media print pages   (datasheet exports)
+ *   - Brand badges          (Discord/LinkedIn fallbacks)
+ */
+:root {
+    /* Core semantic tokens */
+    --p-primary:   #ffffff !important;
+    --p-secondary: #ffffff !important;
+    --p-success:   #ffffff !important;
+    --p-info:      #ffffff !important;
+    --p-warning:   #ffffff !important;
+    --p-danger:    #ffffff !important;
+    --p-light:     #ffffff !important;
+    --p-dark:      #ffffff !important;
+    --p-white:     #ffffff !important;
+    --p-black:     #ffffff !important;
+
+    /* RGB triplets used by rgba(var(--p-*-rgb), α) */
+    --p-primary-rgb:   255, 255, 255 !important;
+    --p-secondary-rgb: 255, 255, 255 !important;
+    --p-success-rgb:   255, 255, 255 !important;
+    --p-info-rgb:      255, 255, 255 !important;
+    --p-warning-rgb:   255, 255, 255 !important;
+    --p-danger-rgb:    255, 255, 255 !important;
+    --p-light-rgb:     255, 255, 255 !important;
+    --p-dark-rgb:      255, 255, 255 !important;
+    --p-white-rgb:     255, 255, 255 !important;
+    --p-black-rgb:     255, 255, 255 !important;
+    --p-body-rgb:      255, 255, 255 !important;
+
+    /* Gray scale */
+    --p-gray-100: #ffffff !important;
+    --p-gray-200: #ffffff !important;
+    --p-gray-300: #ffffff !important;
+    --p-gray-400: #ffffff !important;
+    --p-gray-500: #ffffff !important;
+    --p-gray-600: #ffffff !important;
+    --p-gray-700: #ffffff !important;
+    --p-gray-800: #ffffff !important;
+    --p-gray-900: #ffffff !important;
+    --p-gray:     #ffffff !important;
+    --p-gray-dark: #ffffff !important;
+
+    /* Body / surface tokens */
+    --p-body-bg:    #ffffff !important;
+    --p-body-color: #ffffff !important;
+    --p-border-color: #ffffff !important;
+    --p-link-color: #ffffff !important;
+    --p-link-hover-color: #ffffff !important;
+    --p-heading-color: #ffffff !important;
+    --p-emphasis-color: #ffffff !important;
+
+    /* OM-specific custom var */
+    --om-primary: #ffffff !important;
+
+    /* Brand vars (will fall back to hex if not set elsewhere) */
+    --brand-discord:  #ffffff !important;
+    --brand-linkedin: #ffffff !important;
+}
+
+/* Page background so non-white elements really pop against the test */
+body {
+    background: #888888 !important;
+}

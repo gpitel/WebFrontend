@@ -4,17 +4,17 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 import OperatingPointManual from './OperatingPointManual.vue'
 import OperatingPointHarmonics from './OperatingPointHarmonics.vue'
 import OperatingPointCircuitSimulator from './OperatingPointCircuitSimulator.vue'
-import { roundWithDecimals, deepCopy, removeTrailingZeroes, combinedStyle } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
+import { roundWithDecimals, deepCopy, removeTrailingZeroes, combinedStyle } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
 
-import { defaultOperatingPointExcitation, defaultPrecision, defaultSinusoidalNumberPoints, minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { tooltipsMagneticSynthesisOperatingPoints } from '/WebSharedComponents/assets/js/texts.js'
+import { defaultOperatingPointExcitation, defaultPrecision, defaultSinusoidalNumberPoints, minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { tooltipsMagneticSynthesisOperatingPoints } from 'WebSharedComponents/assets/js/texts.js'
 
 </script>
 <script>
 
 export default {
-    emits: ["updatedSignal", "updatedWaveform", "importedWaveform", "selectedManualOrImported", "selectedAcSweepTypeSelected"],
+    emits: ["updatedSignal", "updatedWaveform", "importedWaveform", "selectedManualOrImported"],
     props: {
         dataTestLabel: {
             type: String,
@@ -33,10 +33,6 @@ export default {
             default: true,
         },
         enableCircuitSimulatorImport: {
-            type: Boolean,
-            default: true,
-        },
-        enableAcSweep: {
             type: Boolean,
             default: true,
         },
@@ -62,6 +58,7 @@ export default {
             masStore,
             taskQueueStore,
             loadedFile: "",
+            importErrorMessage: "",
         }
     },
     computed: {
@@ -96,6 +93,7 @@ export default {
                 this.$stateStore.operatingPointsCircuitSimulator.columnNames[this.currentOperatingPointIndex] = result;
             }
             catch (error) {
+                this.importErrorMessage = "Could not auto-detect columns: " + (error?.message || error);
                 console.error(error)
             }
         },
@@ -105,6 +103,7 @@ export default {
                 this.$stateStore.operatingPointsCircuitSimulator.allLastReadColumnNames = result;
             }
             catch (error) {
+                this.importErrorMessage = "Could not read columns from the uploaded file: " + (error?.message || error);
                 console.error(error)
             }
         },
@@ -117,18 +116,24 @@ export default {
             fr.readAsText(this.$refs["OperatingPoint-MAS-upload-ref"].files.item(0));
         },
         onCircuitSimulatorFileTypeSelected(event) {
+            this.importErrorMessage = "";
+            const fileObj = this.$refs["OperatingPoint-CircuitSimulator-upload-ref"].files.item(0);
+            if (!fileObj) return;
+            const allowedExt = /\.(csv|txt|tsv)$/i;
+            if (!allowedExt.test(fileObj.name)) {
+                this.importErrorMessage = "Unsupported file type: " + fileObj.name +
+                    ". Please upload a .csv, .txt, or .tsv file exported from your circuit simulator.";
+                return;
+            }
             const fr = new FileReader();
 
             fr.onload = async e => {
                 this.loadedFile = e.target.result;
-                // Wait for both async operations to complete before setting the mode
-                await Promise.all([
-                    this.extractAllColumnNames(this.loadedFile),
-                    this.extractMapColumnNames(this.loadedFile)
-                ]);
+                await this.extractAllColumnNames(this.loadedFile);
+                await this.extractMapColumnNames(this.loadedFile);
                 this.$stateStore.operatingPoints.modePerPoint[this.currentOperatingPointIndex] = this.$stateStore.OperatingPointsMode.CircuitSimulatorImport;
             }
-            fr.readAsText(this.$refs["OperatingPoint-CircuitSimulator-upload-ref"].files.item(0));
+            fr.readAsText(fileObj);
         },
         onHarmoncsTypeSelected(event) {
             this.$stateStore.operatingPoints.modePerPoint[this.currentOperatingPointIndex] = this.$stateStore.OperatingPointsMode.HarmonicsList;
@@ -156,7 +161,7 @@ export default {
 <template>
     <div class="op-detail-panel">
         <div class="op-detail-header">
-            <i class="fa-solid fa-wave-square"></i>
+            <i class="pi pi-volume-up"></i>
             <span>Operating Point</span>
         </div>
         <div class="op-detail-body">
@@ -194,8 +199,13 @@ export default {
                 <div class="op-mode-prompt">
                     Where do you want to import your operating point from?
                 </div>
+                <div v-if="importErrorMessage" class="op-mode-error">
+                    <label data-cy="OperatingPoint-import-error" class="text-danger" style="white-space: pre-wrap;">
+                        {{ importErrorMessage }}
+                    </label>
+                </div>
                 <div class="op-mode-buttons">
-                    <input type="file" id="OperatingPoint-CircuitSimulator-upload-input" ref="OperatingPoint-CircuitSimulator-upload-ref" @change="onCircuitSimulatorFileTypeSelected" style="display:none" hidden/>
+                    <input type="file" id="OperatingPoint-CircuitSimulator-upload-input" ref="OperatingPoint-CircuitSimulator-upload-ref" accept=".csv,.txt,.tsv,text/csv,text/plain" @change="onCircuitSimulatorFileTypeSelected" style="display:none" hidden/>
                     <button
                         v-if="enableManual"
                         data-cy="OperatingPoint-source-Manual-button"
@@ -203,7 +213,7 @@ export default {
                         @click="onCircuitSimulatorTypeSelected"
                         class="op-mode-btn"
                     >
-                        <i class="fa-solid fa-file-import"></i>
+                        <i class="pi pi-file-import"></i>
                         <span>Circuit simulator export file or CSV</span>
                     </button>
                     <button
@@ -213,7 +223,7 @@ export default {
                         @click="onManualTypeSelected"
                         class="op-mode-btn"
                     >
-                        <i class="fa-solid fa-pen-to-square"></i>
+                        <i class="pi pi-pencil"></i>
                         <span>I will define it manually</span>
                     </button>
                     <button
@@ -223,7 +233,7 @@ export default {
                         @click="onHarmoncsTypeSelected"
                         class="op-mode-btn"
                     >
-                        <i class="fa-solid fa-chart-line"></i>
+                        <i class="pi pi-chart-line"></i>
                         <span>I want to introduce a list of harmonics</span>
                     </button>
                 </div>
@@ -238,14 +248,14 @@ export default {
     flex-direction: column;
     background:
         linear-gradient(145deg,
-            rgba(var(--bs-primary-rgb), 0.06) 0%,
-            rgba(var(--bs-primary-rgb), 0.02) 100%),
-        var(--bs-dark);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+            rgba(var(--p-primary-rgb), 0.06) 0%,
+            rgba(var(--p-primary-rgb), 0.02) 100%),
+        var(--p-dark);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.15);
     border-radius: 14px;
     box-shadow:
-        0 4px 20px rgba(0, 0, 0, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        0 4px 20px rgba(var(--p-black-rgb), 0.12),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
     min-height: 60vh;
 }
@@ -255,9 +265,9 @@ export default {
     align-items: center;
     gap: 0.5rem;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
-    color: var(--bs-primary);
+    background: rgba(var(--p-primary-rgb), 0.1);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.12);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.95rem;
     letter-spacing: 0.02em;
@@ -266,7 +276,7 @@ export default {
 
 .op-detail-header i {
     font-size: 1rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.45));
 }
 
 .op-detail-body {
@@ -287,7 +297,7 @@ export default {
 }
 
 .op-mode-title {
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-size: 1.35rem;
     font-weight: 700;
     letter-spacing: 0.01em;
@@ -296,7 +306,7 @@ export default {
 }
 
 .op-mode-prompt {
-    color: #f2f2f2;
+    color: var(--p-white);
     font-size: 0.95rem;
     font-weight: 500;
     text-align: center;
@@ -321,17 +331,17 @@ button.op-mode-btn {
     font-weight: 600;
     letter-spacing: 0.01em;
     cursor: pointer;
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.5) !important;
-    background-color: var(--bs-primary) !important;
+    border: 1px solid rgba(var(--p-primary-rgb), 0.5) !important;
+    background-color: var(--p-primary) !important;
     background-image: linear-gradient(135deg,
-        rgba(var(--bs-primary-rgb), 1) 0%,
-        rgba(var(--bs-primary-rgb), 0.8) 100%) !important;
-    color: #ffffff !important;
+        rgba(var(--p-primary-rgb), 1) 0%,
+        rgba(var(--p-primary-rgb), 0.8) 100%) !important;
+    color: var(--p-white) !important;
     box-shadow:
-        0 0 0 1px rgba(var(--bs-primary-rgb), 0.3),
-        0 3px 10px rgba(var(--bs-primary-rgb), 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.3),
+        0 3px 10px rgba(var(--p-primary-rgb), 0.35),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.25);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
     transition: filter 0.15s, transform 0.1s, box-shadow 0.2s;
     width: 100%;
     outline: none;
@@ -342,9 +352,9 @@ button.op-mode-btn:hover {
     filter: brightness(1.15);
     transform: translateY(-1px);
     box-shadow:
-        0 0 0 1px rgba(var(--bs-primary-rgb), 0.4),
-        0 4px 14px rgba(var(--bs-primary-rgb), 0.45),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.4),
+        0 4px 14px rgba(var(--p-primary-rgb), 0.45),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
 }
 
 button.op-mode-btn i {

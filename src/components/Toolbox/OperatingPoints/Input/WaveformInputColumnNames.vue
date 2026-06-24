@@ -1,9 +1,9 @@
 <script setup>
 import { useMasStore } from '../../../../stores/mas'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import { minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { removeTrailingZeroes, combinedStyle } from '/WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import { minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { removeTrailingZeroes, combinedStyle } from 'WebSharedComponents/assets/js/utils.js'
 
 </script>
 
@@ -95,7 +95,7 @@ export default {
         </div>
         <div class="row">
 
-            <Dimension class="border-bottom pb-2 mb-1"
+            <Dimension class="pb-2 mb-1"
                 :name="'frequency'"
                 :unit="'Hz'"
                 :dataTestLabel="dataTestLabel + '-Frequency'"
@@ -104,6 +104,9 @@ export default {
                 :defaultValue="0"
                 :forceUpdate="forceUpdateFrequency"
                 v-model="localData"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
+                :selectStyleClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
@@ -112,13 +115,16 @@ export default {
                 @update="frequencyChanged"
             />
             <label class="text-danger col-12 pt-1" style="font-size: 0.8em">{{errorMessages}}</label>
-            <ElementFromList class="border-bottom pb-2 mb-1"
+            <ElementFromList class="pb-2 mb-1"
                 :name="'time'"
                 :dataTestLabel="dataTestLabel + '-Current-Name'"
                 :options="allColumnNames"
                 :titleSameRow="true"
                 :replaceTitle="'Cur. Time'"
                 v-model="$stateStore.operatingPointsCircuitSimulator.columnNames[currentOperatingPointIndex][currentWindingIndex]"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
+                :selectStyleClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
@@ -126,13 +132,16 @@ export default {
                 :textColor="$styleStore.operatingPoints.inputTextColor"
                 @update="columnNameChanged"
             />
-            <ElementFromList class="border-bottom pb-2 mb-1"
+            <ElementFromList class="pb-2 mb-1"
                 :name="'current'"
                 :dataTestLabel="dataTestLabel + '-Current-Name'"
                 :options="allColumnNames"
                 :titleSameRow="true"
                 :replaceTitle="'Current'"
                 v-model="$stateStore.operatingPointsCircuitSimulator.columnNames[currentOperatingPointIndex][currentWindingIndex]"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
+                :selectStyleClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
@@ -147,6 +156,9 @@ export default {
                 :titleSameRow="true"
                 :replaceTitle="'Voltage'"
                 v-model="$stateStore.operatingPointsCircuitSimulator.columnNames[currentOperatingPointIndex][currentWindingIndex]"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
+                :selectStyleClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"

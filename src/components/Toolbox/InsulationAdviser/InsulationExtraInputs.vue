@@ -1,8 +1,8 @@
 <script setup>
-import { minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { toTitleCase, getMultiplier } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import * as Utils from '/WebSharedComponents/assets/js/utils.js'
+import { minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { toTitleCase, getMultiplier } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import * as Utils from 'WebSharedComponents/assets/js/utils.js'
 </script>
 
 <script>
@@ -22,11 +22,11 @@ export default {
         },
         valueFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         titleFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         labelBgColor: {
             type: [String, Object],
@@ -79,7 +79,7 @@ export default {
                 :unitExtraStyleClass="unitExtraStyleClass"
                 :labelWidthProportionClass="'col-12'"
                 :valueWidthProportionClass="'col-12'"
-                @input="modelValue.frequency = $event.target.value"
+                @input="modelValue.frequency = Number($event.target.value)"
                 @update="$emit('update')"
             />
         </div>
@@ -90,31 +90,6 @@ export default {
                 :replaceTitle="'Voltage Peak'"
                 :unit="'V'"
                 :dataTestLabel="dataTestLabel + '-VoltagePeak'"
-                :min="minimumMaximumScalePerParameter['voltage']['min']"
-                :max="minimumMaximumScalePerParameter['voltage']['max']"
-                :defaultValue="defaultValue.voltage.processed.rms"
-                :allowNegative="false"
-                :modelValue="modelValue.voltage.processed"
-                :titleSameRow="false"
-                :labelFontSize='titleFontSize'
-                :valueFontSize="valueFontSize"
-                :labelBgColor="labelBgColor"
-                :valueBgColor="valueBgColor"
-                :textColor="textColor"
-                :unitExtraStyleClass="unitExtraStyleClass"
-                :labelWidthProportionClass="'col-12'"
-                :valueWidthProportionClass="'col-12'"
-                @input="modelValue.voltage.processed.peak = $event.target.value"
-                @update="$emit('update')"
-            />
-        </div>
-
-        <div class="iei-cell">
-            <Dimension
-                :name="'rms'"
-                :replaceTitle="'Voltage RMS'"
-                :unit="'V'"
-                :dataTestLabel="dataTestLabel + '-VoltageRms'"
                 :min="minimumMaximumScalePerParameter['voltage']['min']"
                 :max="minimumMaximumScalePerParameter['voltage']['max']"
                 :defaultValue="defaultValue.voltage.processed.peak"
@@ -129,7 +104,32 @@ export default {
                 :unitExtraStyleClass="unitExtraStyleClass"
                 :labelWidthProportionClass="'col-12'"
                 :valueWidthProportionClass="'col-12'"
-                @input="modelValue.voltage.processed.rms = $event.target.value"
+                @input="modelValue.voltage.processed.peak = Number($event.target.value)"
+                @update="$emit('update')"
+            />
+        </div>
+
+        <div class="iei-cell">
+            <Dimension
+                :name="'rms'"
+                :replaceTitle="'Voltage RMS'"
+                :unit="'V'"
+                :dataTestLabel="dataTestLabel + '-VoltageRms'"
+                :min="minimumMaximumScalePerParameter['voltage']['min']"
+                :max="minimumMaximumScalePerParameter['voltage']['max']"
+                :defaultValue="defaultValue.voltage.processed.rms"
+                :allowNegative="false"
+                :modelValue="modelValue.voltage.processed"
+                :titleSameRow="false"
+                :labelFontSize='titleFontSize'
+                :valueFontSize="valueFontSize"
+                :labelBgColor="labelBgColor"
+                :valueBgColor="valueBgColor"
+                :textColor="textColor"
+                :unitExtraStyleClass="unitExtraStyleClass"
+                :labelWidthProportionClass="'col-12'"
+                :valueWidthProportionClass="'col-12'"
+                @input="modelValue.voltage.processed.rms = Number($event.target.value)"
                 @update="$emit('update')"
             />
         </div>
@@ -152,16 +152,32 @@ export default {
 
 .iei-cell {
     min-width: 0;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(var(--p-white-rgb), 0.025);
+    border: 1px solid rgba(var(--p-white-rgb), 0.06);
     border-radius: 9px;
     padding: 0.5rem 0.65rem 0.55rem 0.65rem;
     transition: background 0.15s, border-color 0.15s;
+    overflow: hidden;
+}
+.iei-cell :deep(.p-inputgroup),
+.iei-cell :deep(.dwt-group) {
+    width: 100%;
+}
+.iei-cell :deep(.p-inputnumber),
+.iei-cell :deep(.p-inputnumber > input) {
+    min-width: 0;
+    flex: 1 1 auto;
+    width: 100%;
+}
+.iei-cell :deep(.p-select) {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 4.5rem;
 }
 
 .iei-cell:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(var(--bs-primary-rgb), 0.25);
+    background: rgba(var(--p-white-rgb), 0.05);
+    border-color: rgba(var(--p-primary-rgb), 0.25);
 }
 
 .iei-cell :deep(.row) {
@@ -171,7 +187,7 @@ export default {
 
 /* Make the label inside each cell read like an uppercase pill caption */
 .iei-cell :deep(.dim-label) {
-    color: rgba(242, 242, 242, 0.65) !important;
+    color: rgba(var(--p-white-rgb), 0.65) !important;
     font-size: 0.66rem !important;
     font-weight: 700 !important;
     letter-spacing: 0.05em;

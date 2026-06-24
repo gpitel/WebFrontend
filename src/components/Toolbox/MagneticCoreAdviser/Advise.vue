@@ -1,6 +1,6 @@
 <script setup>
 import { Chart, registerables } from 'chart.js'
-import { toTitleCase, removeTrailingZeroes, formatPower, formatPowerDensity, formatInductance, formatTemperature } from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, removeTrailingZeroes, formatPower, formatPowerDensity, formatInductance, formatTemperature } from 'WebSharedComponents/assets/js/utils.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
 
@@ -8,7 +8,7 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 var options = {};
 var chart = null;
 export default {
-    emits: ["adviseReady"],
+    emits: ["adviseReady", "selectedMas", "openDetails"],
     props: {
         adviseIndex: {
             type: Number,
@@ -38,15 +38,15 @@ export default {
     data() {
         const style = getComputedStyle(document.body);
         const theme = {
-          primary: style.getPropertyValue('--bs-primary'),
-          secondary: style.getPropertyValue('--bs-secondary'),
-          success: style.getPropertyValue('--bs-success'),
-          info: style.getPropertyValue('--bs-info'),
-          warning: style.getPropertyValue('--bs-warning'),
-          danger: style.getPropertyValue('--bs-danger'),
-          light: style.getPropertyValue('--bs-light'),
-          dark: style.getPropertyValue('--bs-dark'),
-          white: style.getPropertyValue('--bs-white'),
+          primary: style.getPropertyValue('--p-primary'),
+          secondary: style.getPropertyValue('--p-secondary'),
+          success: style.getPropertyValue('--p-success'),
+          info: style.getPropertyValue('--p-info'),
+          warning: style.getPropertyValue('--p-warning'),
+          danger: style.getPropertyValue('--p-danger'),
+          light: style.getPropertyValue('--p-light'),
+          dark: style.getPropertyValue('--p-dark'),
+          white: style.getPropertyValue('--p-white'),
         };
         const data = {};
         const taskQueueStore = useTaskQueueStore();
@@ -107,7 +107,7 @@ export default {
                         display: false
                     },
                     grid: {
-                        color: "#636363",
+                        color: "var(--p-secondary)",
                         display: true
                     },
                     max: 1,
@@ -170,13 +170,20 @@ export default {
             }
 
             {
-                const aux = formatPower(this.masData.outputs[0].coreLosses.coreLosses);
+                const rawLoss = this.masData.outputs[0].coreLosses.coreLosses;
+                if (rawLoss < 0) {
+                    console.error('[MagneticCoreAdviser] Negative core losses received from MKF:', rawLoss, 'methodUsed:', this.masData.outputs[0].coreLosses.methodUsed);
+                }
+                const aux = formatPower(rawLoss);
                 this.localTexts.coreLosses = `Core losses: ${removeTrailingZeroes(aux.label, 2)} ${aux.unit}`
             }
 
             try {
                 // hardcoded operation point
                 const rmsPower = await this.taskQueueStore.calculateRmsPower(this.masData.inputs.operatingPoints[0].excitationsPerWinding[0]);
+                if (rmsPower == null) {
+                    throw new Error('RMS power could not be calculated: excitation waveform data is missing');
+                }
                 const volume = this.masData.magnetic.core.processedDescription.width *
                                this.masData.magnetic.core.processedDescription.depth * 
                                this.masData.magnetic.core.processedDescription.height;
@@ -227,9 +234,7 @@ export default {
                         <button
                             :data-cy="dataTestLabel + '-advise-' + adviseIndex + '-details-button'"
                             class="advise-btn advise-btn-outline w-100"
-                            data-bs-toggle="offcanvas"
-                            data-bs-target="#CoreAdviserDetailOffCanvas"
-                            @click="$emit('selectedMas')"
+                            @click="$emit('selectedMas'); $emit('openDetails')"
                         >
                             Details
                         </button>
@@ -255,26 +260,26 @@ export default {
     display: flex;
     flex-direction: column;
     background: linear-gradient(180deg,
-        rgba(var(--bs-dark-rgb), 0.75) 0%,
-        rgba(var(--bs-dark-rgb), 0.55) 100%);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.08);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.8);
+        rgba(var(--p-dark-rgb), 0.75) 0%,
+        rgba(var(--p-dark-rgb), 0.55) 100%);
+    border: 1px solid rgba(var(--p-white-rgb), 0.08);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.8);
     border-radius: 14px;
     box-shadow:
-        0 6px 24px rgba(var(--bs-dark-rgb), 0.45),
-        inset 0 1px 0 rgba(var(--bs-light-rgb), 0.04);
+        0 6px 24px rgba(var(--p-dark-rgb), 0.45),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
     transition: all 0.25s ease;
 }
 
 .advise-option-selected {
-    border-color: rgba(var(--bs-primary-rgb), 0.55);
+    border-color: rgba(var(--p-primary-rgb), 0.55);
     background: linear-gradient(180deg,
-        rgba(var(--bs-primary-rgb), 0.1) 0%,
-        rgba(var(--bs-dark-rgb), 0.55) 100%);
+        rgba(var(--p-primary-rgb), 0.1) 0%,
+        rgba(var(--p-dark-rgb), 0.55) 100%);
     box-shadow:
-        0 2px 12px rgba(var(--bs-primary-rgb), 0.2),
-        inset 0 1px 0 rgba(var(--bs-light-rgb), 0.05);
+        0 2px 12px rgba(var(--p-primary-rgb), 0.2),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.05);
 }
 
 .advise-option-header {
@@ -282,14 +287,14 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-light-rgb), 0.04);
-    border-bottom: 1px solid rgba(var(--bs-light-rgb), 0.08);
-    color: var(--bs-primary);
+    background: rgba(var(--p-white-rgb), 0.04);
+    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.08);
+    color: var(--p-primary);
     font-weight: 600;
 }
 
 .advise-option-title {
-    color: var(--bs-white);
+    color: var(--p-white);
     font-size: 1rem;
     font-weight: 600;
 }
@@ -302,9 +307,9 @@ export default {
     border-radius: 999px;
     font-size: 0.8rem;
     font-weight: 700;
-    background: rgba(var(--bs-primary-rgb), 0.2);
-    color: var(--bs-primary);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.45);
+    background: rgba(var(--p-primary-rgb), 0.2);
+    color: var(--p-primary);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.45);
 }
 
 .advise-option-body {
@@ -312,7 +317,7 @@ export default {
 }
 
 .advise-option-metrics {
-    color: rgba(var(--bs-light-rgb), 0.85);
+    color: rgba(var(--p-white-rgb), 0.85);
     font-size: 0.82rem;
 }
 
@@ -339,42 +344,42 @@ export default {
 
 .advise-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(var(--bs-light-rgb), 0.3);
-    text-shadow: 0 1px 1px rgba(var(--bs-dark-rgb), 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-dark-rgb), 0.25);
 }
 
 .advise-btn-success {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-success) 115%, transparent 0%) 0%,
-        var(--bs-success) 55%,
-        rgb(var(--bs-success-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-success) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
+        var(--p-success) 55%,
+        rgb(var(--p-success-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-success-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-success-rgb) / 0.4),
-        inset 0 1px 0 rgba(var(--bs-light-rgb), 0.3);
-    text-shadow: 0 1px 1px rgba(var(--bs-dark-rgb), 0.25);
+        0 0 0 1px rgb(var(--p-success-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-success-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-dark-rgb), 0.25);
 }
 
 .advise-btn-outline {
-    background: rgba(var(--bs-light-rgb), 0.08);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.22);
-    color: var(--bs-light);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.22);
+    color: var(--p-white);
 }
 
 .advise-btn-outline:hover:not(:disabled) {
-    background: rgba(var(--bs-light-rgb), 0.14);
-    border-color: rgba(var(--bs-light-rgb), 0.35);
-    color: var(--bs-white);
+    background: rgba(var(--p-white-rgb), 0.14);
+    border-color: rgba(var(--p-white-rgb), 0.35);
+    color: var(--p-white);
 }
 </style>
 

@@ -1,6 +1,7 @@
 <script setup>
 import { useMasStore } from '../../../stores/mas'
-import { formatUnit, removeTrailingZeroes, deepCopy, downloadBase64asPDF, download } from '/WebSharedComponents/assets/js/utils.js'
+import { formatUnit, removeTrailingZeroes, deepCopy, downloadBase64asPDF, download } from 'WebSharedComponents/assets/js/utils.js'
+import { recordDesign } from 'WebSharedComponents/assets/js/telemetry.js'
 
 </script>
 
@@ -16,15 +17,15 @@ export default {
         const masStore = useMasStore();
         const style = getComputedStyle(document.body);
         const theme = {
-          primary: style.getPropertyValue('--bs-primary'),
-          secondary: style.getPropertyValue('--bs-secondary'),
-          success: style.getPropertyValue('--bs-success'),
-          info: style.getPropertyValue('--bs-info'),
-          warning: style.getPropertyValue('--bs-warning'),
-          danger: style.getPropertyValue('--bs-danger'),
-          light: style.getPropertyValue('--bs-light'),
-          dark: style.getPropertyValue('--bs-dark'),
-          white: style.getPropertyValue('--bs-white'),
+          primary: style.getPropertyValue('--p-primary'),
+          secondary: style.getPropertyValue('--p-secondary'),
+          success: style.getPropertyValue('--p-success'),
+          info: style.getPropertyValue('--p-info'),
+          warning: style.getPropertyValue('--p-warning'),
+          danger: style.getPropertyValue('--p-danger'),
+          light: style.getPropertyValue('--p-light'),
+          dark: style.getPropertyValue('--p-dark'),
+          white: style.getPropertyValue('--p-white'),
         };
         const texts = {
             designRequirements: {},
@@ -42,6 +43,9 @@ export default {
     },
     mounted () {
         this.computeTexts();
+        // Reaching the specifications report = a finished design (captures the
+        // requirements + operating points the user entered, screenshot-safe).
+        recordDesign({ event_type: 'design_report', source: 'spec_report', mas: this.masStore.mas });
     },
     methods: {
         getTitleColor(text) {
@@ -624,19 +628,19 @@ export default {
 <template>
     <div class="container">
         <div class="row">
-            <div class="col-sm-12 col-md-2 text-start border border-primary" style="height: 75vh">
-                <h2 v-if="masStore.mas.inputs.designRequirements.name != '' && masStore.mas.inputs.designRequirements.name != null" class="text-white fs-3 my-1 col-12">Specification for</h2>
-                <h2 class="text-white fs-4 my-2 col-12">{{masStore.mas.inputs.designRequirements.name}}</h2>
+            <div class="col-12 md:col-2 text-left border border-primary" style="height: 75vh">
+                <h2 v-if="masStore.mas.inputs.designRequirements.name != '' && masStore.mas.inputs.designRequirements.name != null" class="text-white text-3xl my-1 col-12">Specification for</h2>
+                <h2 class="text-white text-2xl my-2 col-12">{{masStore.mas.inputs.designRequirements.name}}</h2>
 
 
-                <button :disabled="masExported" :data-cy="dataTestLabel + '-download-MAS-File-button'" class="btn btn-primary col-12 mt-4" @click="exportMAS"> Download MAS file </button>
-                <button :disabled="pdfExported" :data-cy="dataTestLabel + '-download-PDF-File-button'" class="btn btn-primary col-12 mt-4" @click="exportPDF"> Download PDF report </button>
+                <button :disabled="masExported" :data-cy="dataTestLabel + '-download-MAS-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportMAS"> Download MAS file </button>
+                <button :disabled="pdfExported" :data-cy="dataTestLabel + '-download-PDF-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportPDF"> Download PDF report </button>
             </div>
-            <div class="col-sm-12 col-md-10 text-start pe-0">
-                <h2 class="text-white fs-2 my-1">You specified the following requirements:</h2>
-                <h3 class="text-white fs-5 my-2" v-for="(designRequirementText, designRequirementIndex) in texts.designRequirements" :key="designRequirementIndex" v-html="designRequirementText"></h3>
-                <h2 class="text-white fs-2 my-1">You specified the following operating point:</h2>
-                <h3 class="text-white fs-5 my-2" v-for="(operatingPointText, operatingPointIndex) in texts.operatingPoints" :key="operatingPointIndex" v-html="operatingPointText"></h3>
+            <div class="col-12 md:col-10 text-left pr-0">
+                <h2 class="text-white text-4xl my-1">You specified the following requirements:</h2>
+                <h3 class="text-white text-xl my-2" v-for="(designRequirementText, designRequirementIndex) in texts.designRequirements" :key="designRequirementIndex" v-html="designRequirementText"></h3>
+                <h2 class="text-white text-4xl my-1">You specified the following operating point:</h2>
+                <h3 class="text-white text-xl my-2" v-for="(operatingPointText, operatingPointIndex) in texts.operatingPoints" :key="operatingPointIndex" v-html="operatingPointText"></h3>
 
             </div>
         </div>

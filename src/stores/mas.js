@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch, computed  } from 'vue'
-import * as MAS from '/WebSharedComponents/assets/ts/MAS.ts'
-import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
+import * as MAS from 'WebSharedComponents/assets/ts/MAS.ts'
+import * as Defaults from 'WebSharedComponents/assets/js/defaults.js'
 import { useAdviseCacheStore } from './adviseCache'
 
 export const useMasStore = defineStore("mas", () => {
@@ -37,12 +37,32 @@ export const useMasStore = defineStore("mas", () => {
         const adviseCacheStore = getAdviseCacheStore();
         adviseCacheStore.cleanMasAdvises();
         adviseCacheStore.cleanCoreAdvises();
-        
+
         if (type == "power") {
             mas.value = MAS.Convert.toMas(JSON.stringify(Defaults.powerMas));
         }
         else if (type == "filter") {
             mas.value = MAS.Convert.toMas(JSON.stringify(Defaults.filterMas));
+        }
+        else if (type == "dmc") {
+            mas.value = MAS.Convert.toMas(JSON.stringify(Defaults.dmcMas));
+        }
+
+        // Null out requirements that are added by CMC / filter flows but that
+        // `MAS.Convert.toMas` preserves silently. Without this, a user who
+        // runs a CMC design and then switches to Buck inherits the CMC
+        // impedance requirement and the Core Adviser rejects every candidate
+        // because it still runs the impedance filter. See Bug E in
+        // docs/mkf-bug-reports.md.
+        const dr = mas.value?.inputs?.designRequirements;
+        if (dr) {
+            dr.minimumImpedance = null;
+            dr.maximumImpedance = null;
+            if (type === "power") {
+                // Line-frequency + LISN are only meaningful for filter (CMC).
+                dr.lineFrequency = null;
+                dr.lineImpedance = null;
+            }
         }
     }
 
@@ -53,12 +73,20 @@ export const useMasStore = defineStore("mas", () => {
         else if (type == "filter") {
             mas.value.magnetic = MAS.Convert.toMas(JSON.stringify(Defaults.filterMas)).magnetic;
         }
+        else if (type == "dmc") {
+            mas.value.magnetic = MAS.Convert.toMas(JSON.stringify(Defaults.dmcMas)).magnetic;
+        }
     }
+
+    const hasMirroredWindings = computed(() =>
+        mas.value?.inputs?.designRequirements?.topology === 'commonModeChoke'
+    );
 
     return {
         setMas,
         setInputs,
         mas,
+        hasMirroredWindings,
         resetMas,
         resetMagnetic,
         importedMas,

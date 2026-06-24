@@ -1,15 +1,19 @@
 <script setup>
+import { IsolationSide } from 'WebSharedComponents/assets/ts/MAS.ts'
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
-import { combinedStyle, combinedClass, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromListRadio from '/WebSharedComponents/DataInput/ElementFromListRadio.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import PairOfDimensions from '/WebSharedComponents/DataInput/PairOfDimensions.vue'
-import TripleOfDimensions from '/WebSharedComponents/DataInput/TripleOfDimensions.vue'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import { defaultBuckWizardInputs, defaultBoostWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from '/WebSharedComponents/assets/js/defaults.js'
+import { combinedStyle, combinedClass, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import DimensionReadOnly from 'WebSharedComponents/DataInput/DimensionReadOnly.vue'
+import ElementFromListRadio from 'WebSharedComponents/DataInput/ElementFromListRadio.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import PairOfDimensions from 'WebSharedComponents/DataInput/PairOfDimensions.vue'
+import TripleOfDimensions from 'WebSharedComponents/DataInput/TripleOfDimensions.vue'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import { defaultBuckWizardInputs, defaultBoostWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from 'WebSharedComponents/assets/js/defaults.js'
 import ConverterWizardBase from './ConverterWizardBase.vue'
+import CompactVoltageInput from './CompactVoltageInput.vue'
+import { tooltipsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
 
 <script>
@@ -22,15 +26,15 @@ export default {
         },
         dataTestLabel: {
             type: String,
-            default: 'BuckWizard',
+            default: 'BuckBoostWizard',
         },
         labelWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-9'
+            default: 'col-12 md:col-9'
         },
         valueWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-3'
+            default: 'col-12 md:col-3'
         },
     },
     data() {
@@ -49,6 +53,7 @@ export default {
 
         localData["currentOptions"] = currentOptions[0];
         return {
+            buckBoostDiagnostics: null,
             masStore,
             taskQueueStore,
             designLevelOptions,
@@ -66,7 +71,7 @@ export default {
             waveformViewMode: 'magnetic',
             forceWaveformUpdate: 0,
             numberOfPeriods: 2,
-            numberOfSteadyStatePeriods: 10,
+            numberOfSteadyStatePeriods: 50,
         }
     },
     computed: {
@@ -78,8 +83,13 @@ export default {
             });
         },
     },
-    mounted () {
-        this.updateErrorMessage();
+    mounted() {
+        this.$nextTick(() => {
+            if (this._autoRunDone) return;
+            this._autoRunDone = true;
+            try { this.updateErrorMessage?.(); } catch (e) { return; }
+            if (!this.errorMessage) this.simulateIdealWaveforms?.();
+        });
     },
     methods: {
 
@@ -87,6 +97,7 @@ export default {
     buildParams(mode) {
       const aux = {};
       aux['inputVoltage'] = this.localData.inputVoltage;
+      aux['switchingFrequency'] = this.localData.switchingFrequency;
       aux['diodeVoltageDrop'] = this.localData.diodeVoltageDrop;
       aux['efficiency'] = this.localData.efficiency;
       if (this.localData.designLevel == 'I know the design I want') {
@@ -111,16 +122,22 @@ export default {
     getSimulateFn() { const n = this.converterName; return (aux) => this.taskQueueStore[`simulate${n}IdealWaveforms`](aux); },
     getDefaultFrequency() { return this.localData.switchingFrequency; },
     postProcessResults(result, mode) {
+      // C++ emits the topology-specific key (buckDiagnostics / boostDiagnostics
+      // / buckBoostDiagnostics). Pick whichever is present.
+      this.buckBoostDiagnostics = result?.buckDiagnostics ?? result?.boostDiagnostics ?? result?.buckBoostDiagnostics ?? null;
       if (this.designRequirements) this.simulatedInductance = this.designRequirements.magnetizingInductance?.nominal || null;
     },
-    getTopology() { 
+    getTopology() {
       const topologyMap = {
-        'Buck': 'Buck Converter',
-        'Boost': 'Boost Converter',
+        'Buck': 'buckConverter',
+        'Boost': 'boostConverter',
       };
-      return topologyMap[this.converterName] || this.converterName + ' Converter';
+      if (!topologyMap[this.converterName]) {
+        throw new Error(`BuckBoostWizard: unknown converterName '${this.converterName}'`);
+      }
+      return topologyMap[this.converterName];
     },
-    getIsolationSides() { return ['primary']; },
+    getIsolationSides() { return [IsolationSide.Primary]; },
 
             updateErrorMessage() {
             this.errorMessage = "";
@@ -380,7 +397,7 @@ export default {
   <ConverterWizardBase
     ref="base"
     :title="converterName + ' Wizard'"
-    titleIcon="fa-battery-half"
+    titleIcon="pi pi-percentage"
     subtitle="DC-DC Step Down/Up Converter"
     :col1Width="3" :col2Width="4" :col3Width="5"
     :magneticWaveforms="magneticWaveforms"
@@ -405,6 +422,7 @@ export default {
     <template #design-mode>
       <ElementFromListRadio
         :name="'designLevel'"
+        :tooltip="tooltipsConverterWizards['designLevel']"
         :dataTestLabel="dataTestLabel + '-DesignLevel'"
         :replaceTitle="''"
         :options="designLevelOptions"
@@ -422,13 +440,13 @@ export default {
     </template>
 
     <template #design-or-switch-parameters-title>
-      <div class="compact-header"><i class="fa-solid fa-cogs me-1"></i>{{ localData.designLevel == 'I know the design I want' ? 'Design Params' : 'Current Requirement' }}</div>
+      <div class="compact-header"><i class="pi pi-cog-wide-connected mr-1"></i>{{ localData.designLevel == 'I know the design I want' ? 'Design Params' : 'Current Requirement' }}</div>
     </template>
 
     <template #design-or-switch-parameters>
       <div v-if="localData.designLevel == 'I know the design I want'">
         <Dimension
-          :name="'inductance'" :replaceTitle="'Inductance'" unit="H"
+          :name="'inductance'" :tooltip="tooltipsConverterWizards['inductance']" :replaceTitle="'Inductance'" unit="H"
           :dataTestLabel="dataTestLabel + '-Inductance'"
           :min="minimumMaximumScalePerParameter['inductance']['min']"
           :max="minimumMaximumScalePerParameter['inductance']['max']"
@@ -444,6 +462,7 @@ export default {
       <div v-else>
         <ElementFromListRadio
           :name="'currentOptions'"
+          :tooltip="tooltipsConverterWizards['currentOptions']"
           :dataTestLabel="dataTestLabel + '-CurrentOptions'"
           :replaceTitle="''"
           :options="currentOptions"
@@ -457,7 +476,7 @@ export default {
           @update="updateErrorMessage"
         />
         <Dimension v-if="localData.currentOptions == 'The maximum switch current'"
-          :name="'maximumSwitchCurrent'" :replaceTitle="'Max Isw'" unit="A"
+          :name="'maximumSwitchCurrent'" :tooltip="tooltipsConverterWizards['maximumSwitchCurrent']" :replaceTitle="'Max Isw'" unit="A"
           :dataTestLabel="dataTestLabel + '-MaximumSwitchCurrent'"
           :min="minimumMaximumScalePerParameter['current']['min']"
           :max="minimumMaximumScalePerParameter['current']['max']"
@@ -470,7 +489,7 @@ export default {
           @update="updateErrorMessage"
         />
         <Dimension v-if="localData.currentOptions == 'The output current ratio'"
-          :name="'currentRippleRatio'" :replaceTitle="'Ripple'" unit="%" :visualScale="100"
+          :name="'currentRippleRatio'" :tooltip="tooltipsConverterWizards['currentRippleRatio']" :replaceTitle="'Ripple'" unit="%" :visualScale="100"
           :dataTestLabel="dataTestLabel + '-CurrentRippleRatio'"
           :min="0.01" :max="1"
           v-model="localData"
@@ -485,7 +504,7 @@ export default {
     </template>
 
     <template #conditions>
-      <Dimension :name="'switchingFrequency'" :replaceTitle="'Sw. Frequency'" unit="Hz"
+      <Dimension :name="'switchingFrequency'" :tooltip="tooltipsConverterWizards['switchingFrequency']" :replaceTitle="'Sw. Frequency'" unit="Hz"
         :dataTestLabel="dataTestLabel + '-switchingFrequency'"
         :min="minimumMaximumScalePerParameter['frequency']['min']"
         :max="minimumMaximumScalePerParameter['frequency']['max']"
@@ -497,7 +516,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'ambientTemperature'" :replaceTitle="'Temperature'" unit=" C"
+      <Dimension :name="'ambientTemperature'" :tooltip="tooltipsConverterWizards['ambientTemperature']" :replaceTitle="'Temperature'" unit=" C"
         :dataTestLabel="dataTestLabel + '-AmbientTemperature'"
         :min="minimumMaximumScalePerParameter['temperature']['min']"
         :max="minimumMaximumScalePerParameter['temperature']['max']"
@@ -510,7 +529,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'diodeVoltageDrop'" :replaceTitle="'Diode Vd'" unit="V"
+      <Dimension :name="'diodeVoltageDrop'" :tooltip="tooltipsConverterWizards['diodeVoltageDrop']" :replaceTitle="'Diode Vd'" unit="V"
         :dataTestLabel="dataTestLabel + '-DiodeVoltageDrop'"
         :min="0" :max="10"
         v-model="localData"
@@ -521,7 +540,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'efficiency'" :replaceTitle="'Efficiency'" unit="%" :visualScale="100"
+      <Dimension :name="'efficiency'" :tooltip="tooltipsConverterWizards['efficiency']" :replaceTitle="'Efficiency'" unit="%" :visualScale="100"
         :dataTestLabel="dataTestLabel + '-Efficiency'"
         :min="0.5" :max="1"
         v-model="localData"
@@ -536,38 +555,28 @@ export default {
 
     <template #col1-footer>
       <div class="d-flex align-items-center justify-content-between mt-2">
-        <span v-if="errorMessage" class="error-text"><i class="fa-solid fa-exclamation-triangle me-1"></i>{{ errorMessage }}</span>
+        <span v-if="errorMessage" class="error-text"><i class="pi pi-exclamation-triangle mr-1"></i>{{ errorMessage }}</span>
         <span v-else></span>
         <div class="action-btns">
-          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="fa-solid fa-magnifying-glass me-1"></i>Review Specs</button>
-          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Design Magnetic</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="pi pi-search mr-1"></i>Review Specs</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="pi pi-sparkles mr-1"></i>Design Magnetic</button>
         </div>
       </div>
     </template>
-
     <template #input-voltage>
-      <DimensionWithTolerance
-        :name="'inputVoltage'" :replaceTitle="''" unit="V"
+      <CompactVoltageInput
+        :name="'inputVoltage'"
+        :tooltip="tooltipsConverterWizards['inputVoltage']"
         :dataTestLabel="dataTestLabel + '-InputVoltage'"
-        :min="minimumMaximumScalePerParameter['voltage']['min']"
-        :max="minimumMaximumScalePerParameter['voltage']['max']"
-        :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-4'"
-        v-model="localData.inputVoltage"
-        :severalRows="true"
-        :addButtonStyle="$styleStore.wizard.addButton"
-        :removeButtonBgColor="$styleStore.wizard.removeButton['background-color']"
-        :titleFontSize="$styleStore.wizard.inputLabelFontSize"
-        :valueFontSize="$styleStore.wizard.inputFontSize"
-        :labelFontSize="$styleStore.wizard.inputLabelFontSize"
-        :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor"
-        :textColor="$styleStore.wizard.inputTextColor"
+        unit="V"
+        :modelValue="localData.inputVoltage"
         @update="updateErrorMessage"
       />
     </template>
 
     <template #outputs>
       <Dimension
-        :name="'voltage'" :replaceTitle="'Voltage'" unit="V"
+        :name="'voltage'" :tooltip="tooltipsConverterWizards['voltage']" :replaceTitle="'Voltage'" unit="V"
         :dataTestLabel="dataTestLabel + '-OutputVoltage'"
         :min="minimumMaximumScalePerParameter['voltage']['min']"
         :max="minimumMaximumScalePerParameter['voltage']['max']"
@@ -580,7 +589,7 @@ export default {
         @update="updateErrorMessage"
       />
       <Dimension
-        :name="'current'" :replaceTitle="'Current'" unit="A"
+        :name="'current'" :tooltip="tooltipsConverterWizards['current']" :replaceTitle="'Current'" unit="A"
         :dataTestLabel="dataTestLabel + '-OutputCurrent'"
         :min="minimumMaximumScalePerParameter['current']['min']"
         :max="minimumMaximumScalePerParameter['current']['max']"
@@ -592,6 +601,38 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
+    </template>
+    <template v-if="buckBoostDiagnostics" #diagnostics>
+      <!-- Multi-OP table when perOp[] is present; otherwise single-column rows. -->
+      <table
+        v-if="Array.isArray(buckBoostDiagnostics.perOp) && buckBoostDiagnostics.perOp.length > 1"
+        class="diagnostics-perop-table"
+        :data-cy="dataTestLabel + '-BuckBoost-perOp-table'"
+        :style="{ color: $styleStore.wizard.inputTextColor, fontSize: $styleStore.wizard.inputFontSize, width: '100%', borderCollapse: 'collapse' }"
+      >
+        <thead>
+          <tr>
+            <th :style="{ textAlign: 'left', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }"></th>
+            <th v-for="(op, i) in buckBoostDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }">
+              {{ op.operatingPointName || ('OP ' + i) }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Duty</td>              <td v-for="(op, i) in buckBoostDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.dutyCycle).toFixed(3) }}</td></tr>
+          <tr><td>Mode</td>              <td v-for="(op, i) in buckBoostDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ op.isCcm ? 'CCM' : ('DCM (' + Number(op.conductionRatio).toFixed(2) + ')') }}</td></tr>
+          <tr><td>Inductor I avg (A)</td>    <td v-for="(op, i) in buckBoostDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.inductorAverageCurrent).toFixed(3) }}</td></tr>
+          <tr><td>Inductor I peak (A)</td>   <td v-for="(op, i) in buckBoostDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.peakInductorCurrent).toFixed(3) }}</td></tr>
+          <tr><td>Inductor I ripple (A)</td> <td v-for="(op, i) in buckBoostDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.inductorPeakToPeak).toFixed(3) }}</td></tr>
+        </tbody>
+      </table>
+      <template v-else>
+        <DimensionReadOnly name="bbDuty"     :tooltip="tooltipsConverterWizards['bbDuty']"     :replaceTitle="'Duty'"               :value="buckBoostDiagnostics.dutyCycle"              :unit="null" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-BbDuty'" />
+        <DimensionReadOnly name="bbMode"     :tooltip="tooltipsConverterWizards['bbMode']"     :replaceTitle="'Mode'"               :value="buckBoostDiagnostics.conductionRatio >= 1 ? 'CCM' : 'DCM (' + buckBoostDiagnostics.conductionRatio.toFixed(2) + ')'" :unit="null" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-BbMode'" />
+        <DimensionReadOnly name="bbIlAvg"    :tooltip="tooltipsConverterWizards['bbIlAvg']"    :replaceTitle="'Inductor I avg'"     :value="buckBoostDiagnostics.inductorAverageCurrent" unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-BbIlAvg'" />
+        <DimensionReadOnly name="bbIlPk"     :tooltip="tooltipsConverterWizards['bbIlPk']"     :replaceTitle="'Inductor I peak'"    :value="buckBoostDiagnostics.peakInductorCurrent"    unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-BbIlPk'" />
+        <DimensionReadOnly name="bbIlRipple" :tooltip="tooltipsConverterWizards['bbIlRipple']" :replaceTitle="'Inductor I ripple'"  :value="buckBoostDiagnostics.inductorPeakToPeak"     unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-BbIlRipple'" />
+      </template>
     </template>
   </ConverterWizardBase>
 </template>

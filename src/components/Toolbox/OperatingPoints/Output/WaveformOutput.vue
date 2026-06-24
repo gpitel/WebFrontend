@@ -1,9 +1,9 @@
 <script setup>
 
-import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
-import { removeTrailingZeroes } from '/WebSharedComponents/assets/js/utils.js'
-import { minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { toTitleCase, combinedStyle } from '/WebSharedComponents/assets/js/utils.js'
+import DimensionReadOnly from 'WebSharedComponents/DataInput/DimensionReadOnly.vue'
+import { removeTrailingZeroes } from 'WebSharedComponents/assets/js/utils.js'
+import { minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { toTitleCase, combinedStyle } from 'WebSharedComponents/assets/js/utils.js'
 import { useTaskQueueStore } from '../../../../stores/taskQueue'
 </script>
 
@@ -98,11 +98,11 @@ export default {
                 this.modelValue[this.signalDescriptor].processed.rms = processed.rms;
                 this.modelValue[this.signalDescriptor].processed.thd = processed.thd;
                 const label = this.modelValue[this.signalDescriptor].processed.label;
-                if (!label || label == 'Custom') {
+                if (!label || label == 'custom') {
                     this.modelValue[this.signalDescriptor].processed.dutyCycle = processed.dutyCycle;
                     this.modelValue[this.signalDescriptor].processed.peakToPeak = processed.peakToPeak;
                     this.modelValue[this.signalDescriptor].processed.offset = processed.offset;
-                    this.modelValue[this.signalDescriptor].processed.label = 'Custom';
+                    this.modelValue[this.signalDescriptor].processed.label = 'custom';
                 }
             } catch (error) {
                 console.error('Error in process:', error);
@@ -115,11 +115,11 @@ export default {
 <template>
     <div class="wo-card" :class="signalDescriptor === 'current' ? 'wo-card-current' : 'wo-card-voltage'">
         <div class="wo-header">
-            <i :class="signalDescriptor === 'current' ? 'fa-solid fa-wave-square' : 'fa-solid fa-bolt'"></i>
+            <i :class="signalDescriptor === 'current' ? 'pi pi-volume-up' : 'pi pi-bolt'"></i>
             <span>Outputs · {{ signalDescriptor === 'current' ? 'Current' : 'Voltage' }}</span>
         </div>
         <div v-if="!isDataReady" class="wo-loading">
-            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <i class="pi pi-refresh fa-spin fa-spin"></i>
             <span>Calculating…</span>
         </div>
         <div v-else class="wo-body">
@@ -242,23 +242,23 @@ export default {
 .wo-card {
     background:
         linear-gradient(180deg,
-            rgba(var(--bs-primary-rgb), 0.05) 0%,
-            rgba(var(--bs-primary-rgb), 0.015) 100%),
-        var(--bs-dark);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.18);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.7);
+            rgba(var(--p-primary-rgb), 0.05) 0%,
+            rgba(var(--p-primary-rgb), 0.015) 100%),
+        var(--p-dark);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.18);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.7);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 3px 10px rgba(var(--p-black-rgb), 0.3);
     margin: 0.25rem 0;
 }
 
 .wo-card-current {
-    border-left-color: rgba(177, 138, 234, 0.7);
+    border-left-color: rgba(var(--p-warning-rgb), 0.7);
 }
 
 .wo-card-voltage {
-    border-left-color: rgba(0, 182, 255, 0.7);
+    border-left-color: rgba(var(--p-info-rgb), 0.7);
 }
 
 .wo-header {
@@ -266,9 +266,9 @@ export default {
     align-items: center;
     gap: 0.4rem;
     padding: 0.4rem 0.7rem;
-    background: rgba(var(--bs-primary-rgb), 0.08);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
-    color: var(--bs-primary);
+    background: rgba(var(--p-primary-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.12);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.72rem;
     letter-spacing: 0.05em;
@@ -276,23 +276,23 @@ export default {
 }
 
 .wo-card-current .wo-header {
-    color: #b18aea;
-    background: rgba(177, 138, 234, 0.1);
-    border-bottom-color: rgba(177, 138, 234, 0.18);
+    color: var(--p-warning);
+    background: rgba(var(--p-warning-rgb), 0.1);
+    border-bottom-color: rgba(var(--p-warning-rgb), 0.18);
 }
 
 .wo-card-current .wo-header i {
-    filter: drop-shadow(0 0 4px rgba(177, 138, 234, 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-warning-rgb), 0.5));
 }
 
 .wo-card-voltage .wo-header {
-    color: #00b6ff;
-    background: rgba(0, 182, 255, 0.1);
-    border-bottom-color: rgba(0, 182, 255, 0.18);
+    color: var(--p-info);
+    background: rgba(var(--p-info-rgb), 0.1);
+    border-bottom-color: rgba(var(--p-info-rgb), 0.18);
 }
 
 .wo-card-voltage .wo-header i {
-    filter: drop-shadow(0 0 4px rgba(0, 182, 255, 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-info-rgb), 0.5));
 }
 
 .wo-header i {
@@ -313,11 +313,11 @@ export default {
 }
 
 .wo-body :deep(> *:hover) {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--p-white-rgb), 0.03);
 }
 
 .wo-body :deep(> * + *) {
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid rgba(var(--p-white-rgb), 0.04);
 }
 
 .wo-loading {
@@ -326,11 +326,11 @@ export default {
     justify-content: center;
     gap: 0.5rem;
     padding: 1.2rem;
-    color: rgba(242, 242, 242, 0.6);
+    color: rgba(var(--p-white-rgb), 0.6);
     font-size: 0.85rem;
 }
 
 .wo-loading i {
-    color: var(--bs-primary);
+    color: var(--p-primary);
 }
 </style>

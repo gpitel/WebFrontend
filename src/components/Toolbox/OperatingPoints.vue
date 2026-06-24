@@ -2,13 +2,13 @@
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
 import OperatingPoint from './OperatingPoints/OperatingPoint.vue'
-import { roundWithDecimals, deepCopy, combinedStyle } from '/WebSharedComponents/assets/js/utils.js'
+import { roundWithDecimals, deepCopy, combinedStyle } from 'WebSharedComponents/assets/js/utils.js'
 
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import { defaultOperatingPointExcitation, defaultPrecision, defaultSinusoidalNumberPoints, minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { tooltipsMagneticSynthesisOperatingPoints } from '/WebSharedComponents/assets/js/texts.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import { defaultOperatingPointExcitation, defaultPrecision, defaultSinusoidalNumberPoints, minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { tooltipsMagneticSynthesisOperatingPoints } from 'WebSharedComponents/assets/js/texts.js'
 
-import Text from '/WebSharedComponents/DataInput/Text.vue'
+import Text from 'WebSharedComponents/DataInput/Text.vue'
 
 
 </script>
@@ -26,10 +26,6 @@ export default {
             default: true,
         },
         enableCircuitSimulatorImport: {
-            type: Boolean,
-            default: true,
-        },
-        enableAcSweep: {
             type: Boolean,
             default: true,
         },
@@ -74,7 +70,7 @@ export default {
         canContinue() {
             var allSet = true;
 
-            if (this.$stateStore.hasCurrentApplicationMirroredWindings()) {
+            if (this.masStore.hasMirroredWindings) {
                 for (var operatingPointIndex = 0; operatingPointIndex < this.masStore.mas.inputs.operatingPoints.length; operatingPointIndex++) {
                     for (var windingIndex = 0; windingIndex < this.masStore.mas.magnetic.coil.functionalDescription.length; windingIndex++) {
                         this.masStore.mas.inputs.operatingPoints[operatingPointIndex].excitationsPerWinding[windingIndex] = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex];
@@ -157,7 +153,7 @@ export default {
             if (!this.blockingRebounds) {
                 this.blockingRebounds = true;
 
-                if (this.$stateStore.hasCurrentApplicationMirroredWindings()) {
+                if (this.masStore.hasMirroredWindings) {
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding.forEach((excitation, index) => {
                         if (index != this.currentWindingIndex) {
                             this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[index] = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex];
@@ -183,7 +179,7 @@ export default {
             var frequency = this.masStore.mas.inputs.operatingPoints[operatingPointIndex].excitationsPerWinding[windingIndex].frequency;
 
             try {
-                if (processed.label != "Custom") {
+                if (processed.label != "custom") {
                     var waveform = await this.taskQueueStore.createWaveform(processed, frequency);
 
                     if (waveform.data.length > 0) {
@@ -241,10 +237,6 @@ export default {
             }, 100);
             this.$emit("canContinue", this.canContinue);
         },
-        selectedAcSweepTypeSelected() {
-            this.$emit("canContinue", true);
-            this.$emit('changeTool', 'toolSelector')
-        },
         changeWinding(windingIndex) {
 
             if (this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[windingIndex] == null) {
@@ -301,16 +293,16 @@ export default {
 </script>
 
 <template>
-    <div class="container">
+    <div class="op-container">
         <div class="row op-row">
-            <div class="col-sm-12 col-md-2 text-start m-0 px-1 op-panel">
+            <div class="col-12 md:col-2 text-left m-0 px-1 op-panel">
                 <div class="op-header">
-                    <i class="fa-solid fa-list-check"></i>
+                    <i class="pi pi-list-check"></i>
                     <span>Operating points</span>
                 </div>
                 <div class="op-card" :class="{ 'op-card-active': operatingPointIndex == currentOperatingPointIndex }" v-for="(operatingPoint, operatingPointIndex) in masStore.mas.inputs.operatingPoints" :key="operatingPointIndex">
 
-                    <span v-if="$stateStore.operatingPoints.modePerPoint[operatingPointIndex] == null"> Choose a mode for this operating point first <i class="fa-solid fa-right-long ms-3"></i> </span>
+                    <span v-if="$stateStore.operatingPoints.modePerPoint[operatingPointIndex] == null"> Choose a mode for this operating point first <i class="pi pi-arrow-right ml-3"></i> </span>
                     <div v-else class="m-0 px-1">
                         <Text
                             :name="'name'"
@@ -319,14 +311,14 @@ export default {
                             :dataTestLabel="dataTestLabel + '-operating-point-' + operatingPointIndex + '-name-input'"
                             :canBeEmpty="false"
                             :labelWidthProportionClass="'col-0'"
-                            :valueWidthProportionClass="'ms-2 col-11'"
+                            :valueWidthProportionClass="'ml-2 col-11'"
                             :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                             :titleFontSize="$styleStore.operatingPoints.inputTitleFontSize"
                             :labelBgColor="$styleStore.operatingPoints.titleLabelBgColor"
                             :valueBgColor="$styleStore.operatingPoints.titleLabelBgColor"
                             :textColor="$styleStore.operatingPoints.titleTextColor"
                         />
-                        <Dimension class="ps-3 pe-2"
+                        <Dimension class="op-temp px-0"
                             :name="'ambientTemperature'"
                             :replaceTitle="'Temp.'"
                             unit="°C"
@@ -335,6 +327,8 @@ export default {
                             :max="minimumMaximumScalePerParameter['temperature']['max']"
                             :defaultValue="25"
                             v-model="masStore.mas.inputs.operatingPoints[operatingPointIndex].conditions"
+                            :labelWidthProportionClass="'col-12 md:col-3'"
+                            :valueWidthProportionClass="'col-12 md:col-9'"
                             :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                             :labelFontSize="$styleStore.operatingPoints.inputFontSize"
                             :labelBgColor="$styleStore.operatingPoints.operatingPointBgColor"
@@ -342,19 +336,19 @@ export default {
                             :textColor="$styleStore.operatingPoints.inputTextColor"
                         />
                         <div
-                            v-if="$stateStore.hasCurrentApplicationMirroredWindings()"
-                            class="col-12 row m-0 p-0 py-1"
+                            v-if="masStore.hasMirroredWindings"
+                            class="grid m-0 p-0 py-1 align-items-center flex-nowrap"
                             >
                         </div>
                         <div
-                            v-if="!$stateStore.hasCurrentApplicationMirroredWindings() && currentOperatingPointIndex == operatingPointIndex"
-                            class="col-12 row m-0 p-0 py-1 border-top"
+                            v-if="!masStore.hasMirroredWindings && currentOperatingPointIndex == operatingPointIndex"
+                            class="op-winding-row"
                             v-for="(winding, windingIndex) in masStore.mas.magnetic.coil.functionalDescription"
                             :key="'winding-' + windingIndex"
                             >
                             <Text
                                 :disabled="excitationSelectorDisabled"
-                                class="rounded-2 col-7 p-0 px-3 "
+                                class="op-winding-name"
                                 :name="'name'"
                                 v-model="masStore.mas.magnetic.coil.functionalDescription[windingIndex]"
                                 :dataTestLabel="dataTestLabel + '-operating-point-' + operatingPointIndex + '-winding-' + windingIndex + '-name-input'"
@@ -371,56 +365,44 @@ export default {
                             <button
                                 v-tooltip="tooltipsMagneticSynthesisOperatingPoints[(windingIndex == 0? 'reflectPrimary' : 'reflectSecondaries')]"
                                 :style="$styleStore.operatingPoints.reflectWindingButton"
-                                class="btn col-2 p-0"
+                                class="op-winding-btn"
                                 :disabled="excitationSelectorDisabled"
                                 :data-cy="dataTestLabel + '-operating-point-' + operatingPointIndex + '-winding-' + windingIndex + '-reflect-button'"
                                 v-if="masStore.mas.magnetic.coil.functionalDescription.length == 2 && masStore.mas.inputs.operatingPoints[operatingPointIndex].excitationsPerWinding[(windingIndex + 1) % 2] != null"
-                                style="max-height: 1.7em"
                                 @click="reflectWinding(windingIndex)"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-symmetry-vertical" viewBox="0 0 16 16">
-                                    <path d="M7 2.5a.5.5 0 0 0-.939-.24l-6 11A.5.5 0 0 0 .5 14h6a.5.5 0 0 0 .5-.5v-11zm2.376-.484a.5.5 0 0 1 .563.245l6 11A.5.5 0 0 1 15.5 14h-6a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .376-.484zM10 4.46V13h4.658L10 4.46z"/>
-                                </svg>
+                                <i class="pi pi-arrow-right-arrow-left"></i>
                             </button>
-                            <div v-if="!(masStore.mas.magnetic.coil.functionalDescription.length == 2 && masStore.mas.inputs.operatingPoints[operatingPointIndex].excitationsPerWinding[(windingIndex + 1) % 2] != null)" class="fs-6 col-2 p-0" style="max-height: 1.7em">
-                            </div>
                             <button
                                 v-tooltip="tooltipsMagneticSynthesisOperatingPoints['editWindingWaveform']"
                                 :disabled="excitationSelectorDisabled"
                                 :data-cy="dataTestLabel + '-operating-point-' + operatingPointIndex + '-winding-' + windingIndex + '-select-button'"
                                 :style="currentWindingIndex == windingIndex? $styleStore.operatingPoints.selectedWindingButton : isExcitationProcessed(operatingPointIndex, windingIndex)? $styleStore.operatingPoints.unselectedProcessedWindingButton : $styleStore.operatingPoints.unselectedUnprocessedWindingButton"
-                                class="btn col-2 p-0 ms-1"
+                                class="op-winding-btn"
                                 :class="currentWindingIndex == windingIndex? 'disabled' : ''"
                                 @click="changeWinding(windingIndex)"
-                                style="max-height: 1.7em;"
                             >
-                                <svg v-if="currentWindingIndex == windingIndex" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-eye-fill" viewBox="0 0 16 16">
-                                    <path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/>
-                                    <path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8zm8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/>
-                                </svg>
-                                <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-plus-fill" viewBox="0 0 16 16">
-                                    <path d="M9.293 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.707A1 1 0 0 0 13.707 4L10 .293A1 1 0 0 0 9.293 0zM9.5 3.5v-2l3 3h-2a1 1 0 0 1-1-1zM8.5 7v1.5H10a.5.5 0 0 1 0 1H8.5V11a.5.5 0 0 1-1 0V9.5H6a.5.5 0 0 1 0-1h1.5V7a.5.5 0 0 1 1 0z"/>
-                                </svg>
+                                <i :class="currentWindingIndex == windingIndex ? 'pi pi-eye' : 'pi pi-file-plus'"></i>
                             </button>
                         </div>
-                        <div v-else class="col-12 row m-0 p-0 g-2">
-                            <div class="col-6 pe-1">
+                        <div v-else class="grid m-0 p-0 gap-2">
+                            <div class="col-6 pr-1">
                                 <button
                                     :data-cy="dataTestLabel + '-remove-operating-point-' + operatingPointIndex + '-button'"
                                     class="op-btn op-btn-danger w-100 mt-2"
                                     @click="removePoint(operatingPointIndex)"
                                 >
-                                    <i class="fa-solid fa-trash"></i>
+                                    <i class="pi pi-trash"></i>
                                     <span>Remove</span>
                                 </button>
                             </div>
-                            <div class="col-6 ps-1">
+                            <div class="col-6 pl-1">
                                 <button
                                     :data-cy="dataTestLabel + '-select-operating-point-' + operatingPointIndex + '-button'"
                                     class="op-btn op-btn-primary w-100 mt-2"
                                     @click="currentOperatingPointIndex = operatingPointIndex"
                                 >
-                                    <i class="fa-solid fa-check"></i>
+                                    <i class="pi pi-check"></i>
                                     <span>Select</span>
                                 </button>
                             </div>
@@ -432,7 +414,7 @@ export default {
                     class="op-btn op-btn-primary mt-2"
                     @click="addNewOperatingPoint"
                 >
-                    <i class="fa-solid fa-plus"></i>
+                    <i class="pi pi-plus"></i>
                     <span>Add New OP</span>
                 </button>
                 <button
@@ -440,7 +422,7 @@ export default {
                     class="op-btn op-btn-outline mt-2"
                     @click="$emit('changeTool', 'designRequirements')"
                 >
-                    <i class="fa-solid fa-sliders"></i>
+                    <i class="pi pi-sliders-h"></i>
                     <span>Modify No. Windings</span>
                 </button>
 
@@ -449,21 +431,19 @@ export default {
                 </div>
 
             </div>
-            <div v-if="masStore.mas.inputs.operatingPoints.length > 0" class="col-sm-12 col-md-10 text-start pe-0 ">
-                <div v-if="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding.length > 0" class="container mx-auto">
+            <div v-if="masStore.mas.inputs.operatingPoints.length > 0" class="col-12 md:col-10 text-left pr-0 ">
+                <div v-if="masStore.mas.inputs.operatingPoints[currentOperatingPointIndex].excitationsPerWinding.length > 0" class="container mx-auto op-detail-container">
                     <div class="row">
                         <OperatingPoint 
                             :currentOperatingPointIndex="currentOperatingPointIndex"
                             :currentWindingIndex="currentWindingIndex"
                             :enableManual="enableManual"
                             :enableCircuitSimulatorImport="enableCircuitSimulatorImport"
-                            :enableAcSweep="enableAcSweep"
                             :enableHarmonicsList="enableHarmonicsList"
                             @updatedSignal="updatedSignal"
                             @updatedWaveform="updatedWaveform"
                             @importedWaveform="importedWaveform"
                             @selectedManualOrImported="selectedManualOrImported"
-                            @selectedAcSweepTypeSelected="selectedAcSweepTypeSelected"
                         />
                     </div>
                 </div>
@@ -474,21 +454,46 @@ export default {
 </template>
 
 <style scoped>
-.op-row {
+/* Same outer padding as DesignRequirements (.dr-container) so the Operating
+ * Points panel lines up with where the Requirements box used to start
+ * (and doesn't slide under the Storyline / Steps box on the left). */
+.op-container {
+    /* Top padding pushes the "Operating points" / "Operating Point" cards down so
+       their top edge lines up with the Steps card in the left sidebar (which has a
+       constant 8px top spacer). The Steps card itself is not moved. */
+    padding: 10.4px 0.75rem 0 0.75rem;
+    max-width: 100%;
+    width: 100%;
+    overflow-x: hidden;
+}
+
+/* The detail column nests an extra container/row that pushes the
+   "Operating Point" panel ~8px below the list panel — pull it up so both OP
+   cards share the same top edge. */
+.op-detail-container {
+    margin-top: -0.5rem;
+}
+
+/* Neutralize the negative margins my .row shim applies, otherwise the panel
+ * leaks past the parent column edge and overlaps the Steps box. */
+.op-container > .op-row {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    --p-gutter-x: 0.5rem;
     gap: 0.5rem 0;
 }
 
 .op-panel {
     background:
         linear-gradient(145deg,
-            rgba(var(--bs-primary-rgb), 0.06) 0%,
-            rgba(var(--bs-primary-rgb), 0.02) 100%),
-        var(--bs-dark);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+            rgba(var(--p-primary-rgb), 0.06) 0%,
+            rgba(var(--p-primary-rgb), 0.02) 100%),
+        var(--p-dark);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.15);
     border-radius: 14px;
     padding: 0.6rem 0.5rem !important;
     margin: 0.15rem 0 0.5rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
 }
 
 .op-header {
@@ -497,21 +502,21 @@ export default {
     gap: 0.5rem;
     padding: 0.5rem 0.6rem;
     margin: -0.6rem -0.5rem 0.4rem -0.5rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(var(--p-primary-rgb), 0.1);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.12);
     font-weight: 600;
     font-size: 0.9rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
 .op-header i {
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.45));
 }
 
 .op-card {
-    background: rgba(var(--bs-light-rgb), 0.04);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.1);
+    background: rgba(var(--p-white-rgb), 0.04);
+    border: 1px solid rgba(var(--p-white-rgb), 0.1);
     border-radius: 12px;
     padding: 0.55rem 0.5rem;
     margin: 0.35rem 0;
@@ -521,9 +526,9 @@ export default {
 
 .op-card.op-card-active {
     opacity: 1;
-    border-color: rgba(var(--bs-primary-rgb), 0.55);
-    background: rgba(var(--bs-primary-rgb), 0.08);
-    box-shadow: 0 2px 12px rgba(var(--bs-primary-rgb), 0.2);
+    border-color: rgba(var(--p-primary-rgb), 0.55);
+    background: rgba(var(--p-primary-rgb), 0.08);
+    box-shadow: 0 2px 12px rgba(var(--p-primary-rgb), 0.2);
 }
 
 .op-btn {
@@ -552,41 +557,110 @@ export default {
 
 .op-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .op-btn-outline {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.55);
-    color: var(--bs-primary);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55);
+    color: var(--p-primary);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
 }
 
 .op-btn-outline:hover:not(:disabled) {
-    background: rgba(var(--bs-primary-rgb), 0.2);
-    border-color: rgba(var(--bs-primary-rgb), 0.85);
-    color: #ffffff;
-    box-shadow: 0 2px 8px rgba(var(--bs-primary-rgb), 0.3);
+    background: rgba(var(--p-primary-rgb), 0.2);
+    border-color: rgba(var(--p-primary-rgb), 0.85);
+    color: var(--p-white);
+    box-shadow: 0 2px 8px rgba(var(--p-primary-rgb), 0.3);
 }
 
 .op-btn-danger {
-    background: rgb(var(--bs-danger-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-danger-rgb) / 0.55);
-    color: var(--bs-danger);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: rgb(var(--p-danger-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.55);
+    color: var(--p-danger);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
 }
 
 .op-btn-danger:hover:not(:disabled) {
-    background: rgb(var(--bs-danger-rgb) / 0.3);
-    border-color: rgb(var(--bs-danger-rgb) / 0.75);
+    background: rgb(var(--p-danger-rgb) / 0.3);
+    border-color: rgb(var(--p-danger-rgb) / 0.75);
+}
+
+/* Winding row: name input + reflect button + select button on one line.
+   Uses plain flex (not col-N grid) so the narrow OP panel fits all three. */
+.op-winding-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0;
+    width: 100%;
+    min-width: 0;
+}
+.op-winding-name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.op-winding-btn {
+    flex: 0 0 auto;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    outline: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: filter 0.15s;
+}
+.op-winding-btn:focus,
+.op-winding-btn:focus-visible {
+    border: 0;
+    outline: 2px solid rgba(var(--p-primary-rgb), 0.4);
+    outline-offset: 1px;
+}
+.op-winding-btn:hover:not(:disabled) {
+    filter: brightness(1.15);
+}
+.op-winding-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.op-winding-btn i {
+    font-size: 0.9rem;
+}
+
+/* Keep the Temp. value (input + °C unit) inside the operating-point card. */
+:deep(.p-inputgroup),
+:deep(.dwt-group) { width: 100%; min-width: 0; }
+:deep(.p-inputnumber),
+:deep(.p-inputnumber > input) { min-width: 0; flex: 1 1 auto; width: 100%; }
+:deep(.p-inputgroup .p-select),
+:deep(.dwt-unit-addon) { flex: 0 0 auto; min-width: 0; max-width: 3.25rem; }
+
+/* Align Temp row flush-left like the rest of the operating-point card,
+ * with a touch of breathing room above. */
+.op-temp { margin: 0.4rem 0 0 0 !important; padding: 0 !important; }
+.op-temp :deep(.row),
+.op-temp :deep(.grid) {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    align-items: center;
+}
+.op-temp :deep(.row > [class*="col-"]),
+.op-temp :deep(.grid > [class*="col-"]) {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
 }
 </style>

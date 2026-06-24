@@ -1,7 +1,7 @@
 <script setup>
 import Header from '../components/Header.vue'
 import Footer from '../components/Footer.vue'
-import { toTitleCase } from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase } from 'WebSharedComponents/assets/js/utils.js'
 import { useCatalogStore } from '../stores/catalog'
 
 import Catalog from '../components/Toolbox/Catalog.vue'
@@ -60,7 +60,7 @@ export default {
       width: 100%;
       height: 100%;
       opacity: 1;
-      background-image: linear-gradient(to bottom, rgba(26, 26, 26, 0.8), rgba(26, 26, 26, 1)),
+      background-image: linear-gradient(to bottom, rgba(var(--p-dark-rgb), 0.8), rgba(var(--p-dark-rgb), 1)),
     url('/images/background_home.png');
       background-repeat: no-repeat;
       background-position: 50% 0;

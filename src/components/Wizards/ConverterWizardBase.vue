@@ -1,12 +1,12 @@
 <script>
 import ConverterWaveformVisualizer from './ConverterWaveformVisualizer.vue'
+import { recordDesign } from 'WebSharedComponents/assets/js/telemetry.js'
 /**
  * ConverterWizardBase - Base layout + common logic for all converter wizards.
  * Child wizards access common methods via this.$refs.base.methodName().
  *
  * COMMON METHODS:
- *   buildMagneticWaveformsFromInputs, convertConverterWaveforms,
- *   repeatWaveformForPeriods, repeatWaveformsForPeriods,
+  *   buildMagneticWaveformsFromInputs, convertConverterWaveforms,
  *   getTimeAxisOptions, getWaveformsList, getSingleWaveformDataForVisualizer,
  *   getPairedWaveformsList, getPairedWaveformDataForVisualizer,
  *   getPairedWaveformAxisLimits, getPairedWaveformTitle, getOperatingPointLabel,
@@ -21,37 +21,32 @@ import ConverterWaveformVisualizer from './ConverterWaveformVisualizer.vue'
 export default {
   name: 'ConverterWizardBase',
   components: { ConverterWaveformVisualizer },
-  name: 'ConverterWizardBase',
-  components: {
-    ConverterWaveformVisualizer,
-  },
   props: {
     /** Wizard title displayed in the header */
     title: {
       type: String,
       required: true
     },
-    /** FontAwesome icon class for the header */
     titleIcon: {
       type: String,
-      default: 'fa-bolt'
+      default: 'pi pi-bolt'
     },
     /** Optional subtitle/description for the wizard */
     subtitle: {
       type: String,
       default: ''
     },
-    /** Bootstrap xl column width for column 1 (1-12) */
+    /** xl column width for column 1 (1-12) */
     col1Width: {
       type: [String, Number],
       default: 3
     },
-    /** Bootstrap xl column width for column 2 (1-12) */
+    /** xl column width for column 2 (1-12) */
     col2Width: {
       type: [String, Number],
       default: 4
     },
-    /** Bootstrap xl column width for column 3 (1-12) */
+    /** xl column width for column 3 (1-12) */
     col3Width: {
       type: [String, Number],
       default: 5
@@ -125,8 +120,30 @@ export default {
       type: Boolean,
       default: false
     },
-    /** Whether to show the Get SPICE Code button */
+    /** Whether to show the Get SPICE Code button. */
     showSpiceCodeButton: {
+      type: Boolean,
+      default: true
+    },
+    /**
+     * Catalog-input mode. When true, the wizard is being used as a catalog
+     * lookup tool (e.g. el-choker) rather than a designer/advisor: the
+     * "Review Specs" action should be hidden and the primary action label
+     * should read "Find Magnetic" instead of "Design Magnetic".
+     *
+     * Consumed by wizards via the `col1-footer` scoped slot (see slot scope).
+     */
+    catalogMode: {
+      type: Boolean,
+      default: false
+    },
+    /**
+     * Show the wizard topology header (icon + title + subtitle).
+     * Default true. Set false when the host already provides its own
+     * page header (e.g. el-choker, which has its own storyline bar
+     * above the wizard).
+     */
+    showHeader: {
       type: Boolean,
       default: true
     },
@@ -143,7 +160,7 @@ export default {
 
   computed: {
     primaryColor() {
-      return this.$styleStore?.theme?.primary || '#b18aea';
+      return this.$styleStore?.theme?.primary;
     },
     primaryRgb() {
       // Convert hex to rgb for rgba() usage
@@ -201,7 +218,7 @@ export default {
       wizard.waveformSource = mode;
       wizard.simulatingWaveforms = true;
       wizard.waveformError = '';
-      wizard.magneticWaveforms = [];
+      wizard.waveforms = [];
       wizard.converterWaveforms = [];
 
       try {
@@ -215,23 +232,9 @@ export default {
         if (mode === 'analytical') {
           const calculateFn = wizard.getCalculateFn();
           result = await calculateFn(aux);
-          console.log('🔍 [executeWaveformAction] Analytical result from WASM:', {
-            topology: wizard.getTopology?.(),
-            designRequirements: result.designRequirements,
-            turnsRatios: result.designRequirements?.turnsRatios,
-            turnsRatiosCount: result.designRequirements?.turnsRatios?.length,
-            excitationsCount: result.operatingPoints?.[0]?.excitationsPerWinding?.length,
-            excitationNames: result.operatingPoints?.[0]?.excitationsPerWinding?.map(e => e.name)
-          });
         } else {
           const simulateFn = wizard.getSimulateFn();
           result = await simulateFn(aux);
-          console.log('🔍 [executeWaveformAction] Simulation result from WASM:', {
-            topology: wizard.getTopology?.(),
-            excitationsCount: result.operatingPoints?.[0]?.excitationsPerWinding?.length,
-            excitationNames: result.operatingPoints?.[0]?.excitationsPerWinding?.map(e => e.name),
-            converterWaveformsCount: result.converterWaveforms?.length
-          });
         }
 
         await this.processWaveformResults(wizard, result, {
@@ -245,10 +248,9 @@ export default {
         }
 
         wizard.forceWaveformUpdate = (wizard.forceWaveformUpdate || 0) + 1;
-        wizard.$nextTick(() => {
-          const wfSection = wizard.$refs.base?.$refs?.waveformSection;
-          if (wfSection) {
-            wfSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        this.$nextTick(() => {
+          if (this.$refs.waveformViewer && typeof this.$refs.waveformViewer.calculate === 'function') {
+            this.$refs.waveformViewer.calculate();
           }
         });
       } catch (error) {
@@ -263,6 +265,22 @@ export default {
     onGetAnalyticalWaveforms() { this.$emit('get-analytical-waveforms'); },
     onGetSimulatedWaveforms() { this.$emit('get-simulated-waveforms'); },
     onDismissError() { this.$emit('dismiss-error'); },
+
+    // Period/steady-state changes must re-run the waveform generator so the
+    // visible graph actually shows N periods. Without this, the dropdown
+    // updates the value but the existing cached waveform stays at the old
+    // period count (2 by default) until the user clicks Analytical/Simulated
+    // again.
+    onPeriodsChange(n) {
+      this.$emit('update:numberOfPeriods', n);
+      if (this.waveformSource === 'analytical') this.$emit('get-analytical-waveforms');
+      else if (this.waveformSource === 'simulation') this.$emit('get-simulated-waveforms');
+    },
+    onSteadyStateChange(n) {
+      this.$emit('update:numberOfSteadyStatePeriods', n);
+      // Steady-state only affects simulated waveforms; analytical is symbolic.
+      if (this.waveformSource === 'simulation') this.$emit('get-simulated-waveforms');
+    },
 
     // ===== WAVEFORM BUILDING =====
     buildMagneticWaveformsFromInputs(operatingPoints, defaultFrequency) {
@@ -295,39 +313,6 @@ export default {
           if (c.time && c.data) opWf.waveforms.push({ label: `Output ${i+1} Current`, x: c.time, y: c.data, type: 'current', unit: 'A' });
         });
         return opWf;
-      });
-    },
-
-    // ===== WAVEFORM REPETITION =====
-    repeatWaveformForPeriods(time, data, numberOfPeriods) {
-      if (!time || !data || time.length === 0 || numberOfPeriods <= 1) return { time, data };
-      const period = time[time.length-1] - time[0];
-      const nT = [], nD = [];
-      for (let p = 0; p < numberOfPeriods; p++) {
-        const off = p * period;
-        for (let i = 0; i < time.length; i++) {
-          if (p > 0 && i === 0 && nT.length > 0 && Math.abs(nT[nT.length-1] - (time[i]+off)) < 1e-12) continue;
-          nT.push(time[i] + off); nD.push(data[i]);
-        }
-      }
-      return { time: nT, data: nD };
-    },
-
-    repeatWaveformsForPeriods(waveformsData, numberOfPeriods) {
-      if (numberOfPeriods <= 1 || !waveformsData?.length) return waveformsData;
-      return waveformsData.map(op => {
-        if (!op.waveforms) return op;
-        return { ...op, waveforms: op.waveforms.map(wf => {
-          if (!wf.x || wf.x.length < 2) return wf;
-          const period = wf.x[wf.x.length-1] - wf.x[0];
-          const rX = [...wf.x], rY = [...wf.y];
-          for (let p = 1; p < numberOfPeriods; p++) {
-            const off = period * p;
-            wf.x.slice(1).forEach(x => rX.push(x + off));
-            wf.y.slice(1).forEach(y => rY.push(y));
-          }
-          return { ...wf, x: rX, y: rY };
-        })};
       });
     },
 
@@ -404,28 +389,8 @@ export default {
       const operatingPoints = result.operatingPoints;
       const designRequirements = result.designRequirements;
       
-      // Debug: Log raw data from WASM
-      console.log('🔍 [processAnalyticalWaveforms] Raw WASM data:', {
-        excitationsCount: operatingPoints[0]?.excitationsPerWinding?.length,
-        excitationNames: operatingPoints[0]?.excitationsPerWinding?.map(e => e.name),
-        excitationFrequencies: operatingPoints[0]?.excitationsPerWinding?.map(e => e.frequency),
-        firstExcitationCurrentLength: operatingPoints[0]?.excitationsPerWinding?.[0]?.current?.waveform?.data?.length,
-        firstExcitationVoltageLength: operatingPoints[0]?.excitationsPerWinding?.[0]?.voltage?.waveform?.data?.length
-      });
-      
       // Build magnetic waveforms from operating points
       let magneticWaveforms = this.buildMagneticWaveformsFromInputs(operatingPoints);
-      
-      // Debug: Log built waveforms
-      console.log('🔍 [processAnalyticalWaveforms] Built waveforms:', {
-        operatingPointsCount: magneticWaveforms.length,
-        totalWaveforms: magneticWaveforms.reduce((sum, op) => sum + (op.waveforms?.length || 0), 0),
-        waveformsByOp: magneticWaveforms.map(op => ({
-          name: op.operatingPointName,
-          count: op.waveforms?.length,
-          labels: op.waveforms?.map(w => w.label)
-        }))
-      });
       
       // Note: We do NOT repeat waveforms here because the backend MKF already
       // applies numberOfPeriods when generating the waveforms in operatingPoints.
@@ -440,7 +405,7 @@ export default {
           label: w.label || 'Unknown',
           x: w.x,
           y: w.y,
-          colorLabel: w.color || '#b18aea',
+          colorLabel: w.color,
           type: 'value',
           position: 'left',
           unit: w.unit || 'A',
@@ -492,7 +457,7 @@ export default {
     },
 
     // ===== VISUALIZER HELPERS =====
-    getTimeAxisOptions() { return { label: 'Time', colorLabel: '#d4d4d4', type: 'value', unit: 's' }; },
+    getTimeAxisOptions() { return { label: 'Time', colorLabel: 'var(--p-light)', type: 'value', unit: 's' }; },
     getWaveformsList(waveforms, opIdx) { return waveforms?.[opIdx]?.waveforms || []; },
 
     getSingleWaveformDataForVisualizer(waveforms, opIdx, wfIdx) {
@@ -506,9 +471,9 @@ export default {
         const r = p95 - p5, m = r * 0.1;
         yData = yData.map(v => Math.max(p5 - m, Math.min(p95 + m, v)));
       }
-      let color = '#ffffff';
-      if (isV) color = this.$styleStore?.operatingPoints?.voltageGraph?.color || '#b18aea';
-      else if (isI) color = this.$styleStore?.operatingPoints?.currentGraph?.color || '#4CAF50';
+      let color = 'var(--p-white)';
+      if (isV) color = this.$styleStore?.operatingPoints?.voltageGraph?.color;
+      else if (isI) color = this.$styleStore?.operatingPoints?.currentGraph?.color;
       return [{ label: wf.label, data: { x: wf.x, y: yData }, colorLabel: color, type: 'value', position: 'left', unit: wf.unit, numberDecimals: 6 }];
     },
 
@@ -554,11 +519,11 @@ export default {
       const pair = pairs[pairIdx], result = [];
       if (pair.voltage) {
         result.push({ label: pair.voltage.wf.label, data: { x: pair.voltage.wf.x, y: this._clipVoltage(pair.voltage.wf.y) },
-          colorLabel: this.$styleStore?.operatingPoints?.voltageGraph?.color || '#b18aea', type: 'value', position: 'left', unit: 'V', numberDecimals: 6 });
+          colorLabel: this.$styleStore?.operatingPoints?.voltageGraph?.color, type: 'value', position: 'left', unit: 'V', numberDecimals: 6 });
       }
       if (pair.current) {
         result.push({ label: pair.current.wf.label, data: { x: pair.current.wf.x, y: pair.current.wf.y },
-          colorLabel: this.$styleStore?.operatingPoints?.currentGraph?.color || '#4CAF50', type: 'value', position: 'right', unit: 'A', numberDecimals: 6 });
+          colorLabel: this.$styleStore?.operatingPoints?.currentGraph?.color, type: 'value', position: 'right', unit: 'A', numberDecimals: 6 });
       }
       return result;
     },
@@ -642,12 +607,12 @@ export default {
                 }
                 if (!exc[sig].processed?.rms) {
                   const pr = await tqs.calculateProcessed(exc[sig].harmonics, exc[sig].waveform);
-                  exc[sig].processed = { ...pr, label: "Custom" };
+                  exc[sig].processed = { ...pr, label: "custom" };
                 }
               } catch (e) {
-                console.error(`Error ${sig}:`, e);
-                exc[sig].harmonics = { amplitudes: [0], frequencies: [freq] };
-                exc[sig].processed = { label: "Custom", dutyCycle: 0.5, peakToPeak: 0, offset: 0, rms: 0 };
+                // No fallback: fabricating zero harmonics here masked a real
+                // engine bug (excitations arriving with frequency 0) for months.
+                throw new Error(`processSimulatedOperatingPoints: ${sig} harmonics/processed calculation failed (frequency=${freq}): ${e.message}`);
               }
             }
           }
@@ -657,7 +622,16 @@ export default {
     },
 
     // ===== NAVIGATION =====
+    trackWizardEvent(action, ms) {
+      recordDesign({
+        event_type: action === 'design_magnetic' ? 'wizard_submit' : 'wizard_review',
+        source: 'wizard/' + this.title,
+        mas: ms.mas,
+      });
+    },
+
     async navigateToReview(ss, ms, appType) {
+      this.trackWizardEvent('review_specs', ms);
       ss.resetMagneticTool(); ss.designLoaded();
       ss.closeCoilAdvancedInfo();  // Ensure coil advanced info is disabled
       ss.selectApplication(ss.SupportedApplications[appType]);
@@ -675,6 +649,7 @@ export default {
     },
 
     async navigateToAdvise(ss, ms, appType) {
+      this.trackWizardEvent('design_magnetic', ms);
       ss.resetMagneticTool(); ss.designLoaded();
       ss.closeCoilAdvancedInfo();  // Ensure coil advanced info is disabled
       ss.selectApplication(ss.SupportedApplications[appType]);
@@ -713,7 +688,7 @@ export default {
       // If we don't have a valid frequency, we can't determine the period
       // Return the waveform as-is - it's likely already a single period
       if (!frequency || frequency <= 0) {
-        console.log('[extractSinglePeriod] No valid frequency, returning waveform as-is');
+        // No valid frequency, returning waveform as-is
         return { time, data };
       }
       
@@ -803,7 +778,7 @@ export default {
         // Calculate harmonics and processed data if missing (required for masStore)
         ops = await this.processSimulatedOperatingPoints(ops, tqs);
         
-        await this.setupMasStore({ designRequirements: dr, operatingPoints: ops, topology: wi.getTopology(), isolationSides: wi.getIsolationSides(), insulationType: wi.getInsulationType?.(), wizardInstance: wi });
+        await this.setupMasStore({ designRequirements: dr, operatingPoints: ops, topology: wi.getTopology(), isolationSides: wi.getIsolationSides(), coilGroups: wi.getCoilGroups?.() ?? [], insulationType: wi.getInsulationType?.(), wizardInstance: wi });
         return { success: true, operatingPoints: ops, designRequirements: dr };
       } catch (e) { 
         console.error('processWizardData:', e); 
@@ -811,7 +786,7 @@ export default {
       }
     },
 
-    async setupMasStore({ designRequirements, operatingPoints, topology, isolationSides, insulationType, wizardInstance: wi }) {
+    async setupMasStore({ designRequirements, operatingPoints, topology, isolationSides, coilGroups, insulationType, wizardInstance: wi }) {
       // Normalize operating points to ensure processed data is properly structured
       const normalizedOperatingPoints = operatingPoints.map(op => ({
         ...op,
@@ -819,20 +794,50 @@ export default {
           ...exc,
           current: exc.current ? {
             ...exc.current,
-            processed: exc.current.processed || { label: 'Sinusoidal', dutyCycle: 0.5 }
+            processed: exc.current.processed || { label: 'sinusoidal', dutyCycle: 0.5 }
           } : undefined,
           voltage: exc.voltage ? {
             ...exc.voltage,
-            processed: exc.voltage.processed || { label: 'Sinusoidal', dutyCycle: 0.5 }
+            processed: exc.voltage.processed || { label: 'sinusoidal', dutyCycle: 0.5 }
           } : undefined
         }))
       }));
       wi.masStore.mas.inputs = { designRequirements, operatingPoints: normalizedOperatingPoints };
       wi.masStore.mas.magnetic.coil.functionalDescription = operatingPoints[0].excitationsPerWinding.map((e, i) => ({
-        name: e.name, numberTurns: 0, numberParallels: 0, isolationSide: isolationSides[i] || 'primary', wire: ""
+        name: e.name, numberTurns: 0, numberParallels: 0, isolationSide: isolationSides[i] || 'primary', wire: "Dummy"
       }));
+      // Apply coil groups (windings that share sections via wound_with).
+      // Each group is a list of winding names; every member's woundWith is
+      // set to the OTHER group members. The Coil virtualization step then
+      // collapses the group into a single virtual winding for section
+      // layout, while keeping the per-winding turn counts intact.
+      if (Array.isArray(coilGroups) && coilGroups.length > 0) {
+        const fd = wi.masStore.mas.magnetic.coil.functionalDescription;
+        const validNames = new Set(fd.map(w => w.name));
+        for (const group of coilGroups) {
+          if (!Array.isArray(group) || group.length < 2) continue;
+          for (const name of group) {
+            if (!validNames.has(name)) {
+              throw new Error(`coilGroup references unknown winding "${name}"; available: ${[...validNames].join(', ')}`);
+            }
+          }
+          for (const winding of fd) {
+            if (group.includes(winding.name)) {
+              winding.woundWith = group.filter(n => n !== winding.name);
+            }
+          }
+        }
+      }
       wi.masStore.mas.inputs.designRequirements.topology = topology;
       wi.masStore.mas.inputs.designRequirements.isolationSides = isolationSides;
+      // turnsRatios is required-array on the MAS DesignRequirements schema
+      // (quicktype validator rejects undefined). For non-isolated topologies
+      // there is no transformer ratio, so an empty array is the correct
+      // value. Wizards that DO have a real ratio set it on `dr` before
+      // calling setupMasStore; we never overwrite.
+      if (!Array.isArray(wi.masStore.mas.inputs.designRequirements.turnsRatios)) {
+        wi.masStore.mas.inputs.designRequirements.turnsRatios = [];
+      }
       if (insulationType && insulationType !== 'No') {
         const { defaultDesignRequirements } = await import('/WebSharedComponents/assets/js/defaults.js');
         wi.masStore.mas.inputs.designRequirements.insulation = defaultDesignRequirements.insulation;
@@ -867,7 +872,7 @@ export default {
           throw new Error('taskQueueStore not available on wizard instance');
         }
 
-        console.log(`Generating SPICE code for ${topology}...`);
+        // Generating SPICE code
         const netlist = await taskQueueStore.generateSpiceCode(topology, aux);
 
         this.spiceCode = netlist;
@@ -896,6 +901,155 @@ export default {
       this.showSpiceCodeModal = false;
       this.spiceCode = '';
       this.spiceCodeTopology = '';
+    },
+
+    // ===== SHARED WAVEFORM UTILITIES (moved from individual wizards) =====
+
+    // Synthesize time-domain waveform from harmonics (Fourier synthesis)
+    synthesizeWaveformFromHarmonics(harmonics, frequency, numPoints = 200, numberOfPeriods = 1) {
+      if (!harmonics?.amplitudes || !harmonics?.frequencies || harmonics.amplitudes.length === 0) {
+        return null;
+      }
+
+      const period = 1 / frequency;
+      const xData = [];
+      const yData = [];
+
+      for (let i = 0; i < numPoints; i++) {
+        const t = (i / numPoints) * period * numberOfPeriods;
+        xData.push(t);
+
+        let value = 0;
+        for (let h = 0; h < harmonics.amplitudes.length; h++) {
+          const amplitude = harmonics.amplitudes[h];
+          const freq = harmonics.frequencies[h];
+          const phase = harmonics.phases ? harmonics.phases[h] : 0;
+
+          if (freq === 0) {
+            value += amplitude;
+          } else {
+            value += amplitude * Math.cos(2 * Math.PI * freq * t + phase);
+          }
+        }
+        yData.push(value);
+      }
+
+      return { x: xData, y: yData };
+    },
+
+    getPairedWaveformsList(waveforms, operatingPointIndex, isMagnetic = false) {
+      if (!waveforms || !waveforms[operatingPointIndex] || !waveforms[operatingPointIndex].waveforms) {
+        return [];
+      }
+
+      let allWaveforms = waveforms[operatingPointIndex].waveforms;
+
+      if (isMagnetic) {
+        allWaveforms = allWaveforms.filter(wf =>
+          wf.label.toLowerCase().includes('winding') ||
+          wf.label.toLowerCase().includes('inductor') ||
+          wf.label.toLowerCase().includes('magnetizing') ||
+          wf.label.toLowerCase().includes('primary') ||
+          wf.label.toLowerCase().includes('secondary')
+        );
+
+        const pairs = [];
+        const used = new Set();
+
+        for (let i = 0; i < allWaveforms.length; i++) {
+          if (used.has(i)) continue;
+
+          const wf = allWaveforms[i];
+          const isVoltage = wf.unit === 'V';
+          const isCurrent = wf.unit === 'A';
+
+          let pairIndex = -1;
+          const labelPrefix = wf.label.replace(/(Voltage|Current)/i, '').trim();
+
+          for (let j = 0; j < allWaveforms.length; j++) {
+            if (i === j || used.has(j)) continue;
+            const otherWf = allWaveforms[j];
+            const otherPrefix = otherWf.label.replace(/(Voltage|Current)/i, '').trim();
+
+            if (labelPrefix === otherPrefix) {
+              if ((isVoltage && otherWf.unit === 'A') || (isCurrent && otherWf.unit === 'V')) {
+                pairIndex = j;
+                break;
+              }
+            }
+          }
+
+          if (pairIndex >= 0) {
+            used.add(i);
+            used.add(pairIndex);
+            pairs.push({
+              voltageWf: isVoltage ? allWaveforms[i] : allWaveforms[pairIndex],
+              currentWf: isCurrent ? allWaveforms[i] : allWaveforms[pairIndex]
+            });
+          } else {
+            used.add(i);
+            pairs.push({
+              voltageWf: isVoltage ? allWaveforms[i] : null,
+              currentWf: isCurrent ? allWaveforms[i] : null
+            });
+          }
+        }
+
+        return pairs;
+      }
+
+      const pairs = [];
+
+      const switchNodeVoltage = allWaveforms.find(wf => wf.label.toLowerCase().includes('switch node'));
+      const inductorCurrent = allWaveforms.find(wf =>
+        (wf.label.toLowerCase().includes('inductor') || wf.label.toLowerCase().includes('primary')) &&
+        wf.unit === 'A'
+      );
+      const inputVoltage = allWaveforms.find(wf => wf.label.toLowerCase().includes('input') && wf.unit === 'V');
+      const outputVoltage = allWaveforms.find(wf => wf.label.toLowerCase().includes('output') && wf.unit === 'V');
+
+      if (switchNodeVoltage || inductorCurrent) {
+        pairs.push({
+          voltageWf: switchNodeVoltage || null,
+          currentWf: inductorCurrent || null
+        });
+      }
+
+      if (inputVoltage || outputVoltage) {
+        pairs.push({
+          leftWf: inputVoltage || null,
+          rightWf: outputVoltage || null,
+          isVoltagePair: true
+        });
+      }
+
+      return pairs;
+    },
+
+    isVoltagePairAtIndex(waveforms, operatingPointIndex, pairIndex, isMagnetic) {
+      const pairs = this.getPairedWaveformsList(waveforms, operatingPointIndex, isMagnetic);
+      if (!pairs || pairIndex >= pairs.length) return false;
+      return pairs[pairIndex].isVoltagePair === true;
+    },
+
+    getVoltagePairAxisLimits(waveforms, operatingPointIndex, pairIndex, isMagnetic) {
+      if (!this.isVoltagePairAtIndex(waveforms, operatingPointIndex, pairIndex, isMagnetic)) {
+        return { forceAxisMin: null, forceAxisMax: null };
+      }
+
+      const data = this.getPairedWaveformDataForVisualizer(waveforms, operatingPointIndex, pairIndex, isMagnetic);
+      if (!data || data.length < 2) {
+        return { forceAxisMin: [0, 0], forceAxisMax: null };
+      }
+
+      const maxLeft = Math.max(...data[0].data.y);
+      const maxRight = Math.max(...data[1].data.y);
+      const sharedMax = Math.max(maxLeft, maxRight) * 1.1;
+
+      return {
+        forceAxisMin: [0, 0],
+        forceAxisMax: [sharedMax, sharedMax]
+      };
     }
   }
 }
@@ -905,10 +1059,10 @@ export default {
   <div class="wizard-container container-fluid px-3">
     <!-- Header -->
     <slot name="header">
-      <div class="wizard-header" :style="headerBgStyle">
+      <div v-if="showHeader" class="wizard-header" :style="headerBgStyle">
         <div class="wizard-header-content">
           <div class="wizard-icon-container" :style="iconContainerStyle">
-            <i :class="['fa-solid', titleIcon, 'wizard-icon']"></i>
+            <i :class="[titleIcon, 'wizard-icon']"></i>
           </div>
           <div class="wizard-title-section">
             <h4 class="wizard-title">{{ title }}</h4>
@@ -920,7 +1074,7 @@ export default {
 
     <!-- Top-level Error Message (dismissible) -->
     <div v-if="errorMessage" class="alert alert-danger alert-dismissible fade show py-2 mt-3" role="alert" style="font-size: 0.85rem;">
-      <i class="fa-solid fa-exclamation-circle me-2"></i>{{ errorMessage }}
+      <i class="pi pi-exclamation-circle mr-2"></i>{{ errorMessage }}
       <button type="button" class="btn-close btn-close-sm" @click="onDismissError"></button>
     </div>
 
@@ -929,10 +1083,11 @@ export default {
       <div :class="col1Class">
         <div class="d-flex flex-column gap-2">
 
-          <!-- Design Mode -->
-          <div class="compact-card">
-            <div class="compact-header"><i class="fa-solid fa-sliders me-1"></i>Design Mode</div>
-            <div class="compact-body ps-4">
+          <!-- Design Mode (only rendered if the wizard supplies the slot;
+               AHB and PSHB intentionally omit it — see WIZARDS_GUIDE §3.5) -->
+          <div v-if="$slots['design-mode']" class="compact-card">
+            <div class="compact-header"><i class="pi pi-sliders-h mr-1"></i>Design Mode</div>
+            <div class="compact-body pl-4">
               <slot name="design-mode">
               </slot>
             </div>
@@ -942,23 +1097,23 @@ export default {
           <div v-if="$slots['design-or-switch-parameters']" class="compact-card">
             <slot name="design-or-switch-parameters-title">
             </slot>
-            <div class="compact-body ps-4 pe-3">
+            <div class="compact-body pl-4 pr-3">
               <slot name="design-or-switch-parameters">
               </slot>
             </div>
           </div>
 
           <!-- Conditions -->
-          <div class="compact-card">
-            <div class="compact-header"><i class="fa-solid fa-gauge-high me-1"></i>Conditions</div>
-            <div class="compact-body ps-4">
+          <div v-if="$slots.conditions" class="compact-card">
+            <div class="compact-header"><i class="pi pi-gauge mr-1"></i>Conditions</div>
+            <div class="compact-body pl-4">
               <slot name="conditions">
               </slot>
           </div>
           </div>
         </div>
         <!-- Footer area below col1 (actions, inline error, etc.) -->
-        <slot name="col1-footer">
+        <slot name="col1-footer" :catalogMode="catalogMode">
           <!-- Wizard can place action buttons here -->
         </slot>
       </div>
@@ -969,7 +1124,7 @@ export default {
 
           <!-- Input Voltage -->
           <div v-if="showInputVoltage" class="compact-card">
-            <div class="compact-header"><i class="fa-solid fa-plug me-1"></i>Input Voltage</div>
+            <div class="compact-header"><i class="pi pi-bolt mr-1"></i>Input Voltage</div>
             <div class="compact-body">
               <slot name="input-voltage">
               </slot>
@@ -977,9 +1132,9 @@ export default {
           </div>
 
           <!-- Outputs -->
-          <div class="compact-card">
-            <div class="compact-header"><i class="fa-solid fa-arrow-right-from-bracket me-1"></i>Outputs</div>
-            <div class="compact-body ps-4 pe-3">
+          <div v-if="$slots.outputs" class="compact-card">
+            <div class="compact-header"><i class="pi pi-box-arrow-right mr-1"></i>Outputs</div>
+            <div class="compact-body pl-4 pr-3">
               <slot name="outputs">
               </slot>
             </div>
@@ -987,8 +1142,8 @@ export default {
 
           <!-- Diagnostics (optional): topology-specific read-only diagnostic rows. -->
           <div v-if="$slots.diagnostics" class="compact-card">
-            <div class="compact-header"><i class="fa-solid fa-chart-line me-1"></i>Diagnostics</div>
-            <div class="compact-body ps-4 pe-3">
+            <div class="compact-header"><i class="pi pi-chart-line mr-1"></i>Diagnostics</div>
+            <div class="compact-body pl-4 pr-3">
               <slot name="diagnostics"></slot>
             </div>
           </div>
@@ -1003,14 +1158,14 @@ export default {
           <!-- Waveforms Card -->
           <div class="compact-card simulation-card" :class="'h-100'">
             <div class="compact-header d-flex justify-content-between align-items-center">
-              <span><i class="fa-solid fa-wave-square me-1"></i>Waveforms</span>
+              <span><i class="pi pi-volume-up mr-1"></i>Waveforms</span>
               <div class="d-flex align-items-center gap-2">
                 <!-- Periods Selector -->
                 <div v-if="showPeriodsSelector" class="periods-selector">
                   <label class="periods-label">Periods:</label>
                   <select
                     :value="numberOfPeriods"
-                    @change="$emit('update:numberOfPeriods', Number($event.target.value))"
+                    @change="onPeriodsChange(Number($event.target.value))"
                     class="periods-select"
                   >
                     <option v-for="n in 10" :key="n" :value="n">{{ n }}</option>
@@ -1022,7 +1177,7 @@ export default {
                   <input
                     type="number"
                     :value="numberOfSteadyStatePeriods"
-                    @input="$emit('update:numberOfSteadyStatePeriods', Number($event.target.value))"
+                    @input="onSteadyStateChange(Number($event.target.value))"
                     min="1"
                     max="20"
                     class="periods-select"
@@ -1039,20 +1194,20 @@ export default {
                       title="Get analytical waveforms"
                     >
                       <span v-if="simulatingWaveforms && waveformSource === 'analytical'">
-                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <i class="pi pi-refresh fa-spin fa-spin"></i>
                       </span>
-                      <span v-else><i class="fa-solid fa-calculator"></i> Analytical</span>
+                      <span v-else><i class="pi pi-calculator"></i> Analytical</span>
                     </button>
                     <button
-                      class="sim-btn"
+                      class="sim-btn simulated"
                       :disabled="disableActions || simulatingWaveforms"
                       @click="onGetSimulatedWaveforms"
                       title="Simulate ideal waveforms"
                     >
                       <span v-if="simulatingWaveforms && waveformSource === 'simulation'">
-                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <i class="pi pi-refresh fa-spin fa-spin"></i>
                       </span>
-                      <span v-else><i class="fa-solid fa-play"></i> Simulated</span>
+                      <span v-else><i class="pi pi-play"></i> Simulated</span>
                     </button>
                     <button
                       v-if="showSpiceCodeButton"
@@ -1062,9 +1217,9 @@ export default {
                       title="Get SPICE netlist for external simulation"
                     >
                       <span v-if="spiceCodeLoading">
-                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <i class="pi pi-refresh fa-spin fa-spin"></i>
                       </span>
-                      <span v-else><i class="fa-solid fa-file-code"></i> SPICE</span>
+                      <span v-else><i class="pi pi-file-code"></i> SPICE</span>
                     </button>
                   </slot>
                 </div>
@@ -1072,7 +1227,7 @@ export default {
             </div>
             <div class="compact-body simulation-body">
               <div v-if="waveformError" class="error-text mb-2">
-                <i class="fa-solid fa-exclamation-circle me-1"></i>{{ waveformError }}
+                <i class="pi pi-exclamation-circle mr-1"></i>{{ waveformError }}
               </div>
               <slot name="waveforms">
                 <ConverterWaveformVisualizer
@@ -1096,31 +1251,31 @@ export default {
   <!-- SPICE Code Modal -->
   <div v-if="showSpiceCodeModal" class="modal fade show" tabindex="-1" style="display: block; z-index: 1055;">
     <div class="modal-dialog modal-lg modal-dialog-centered">
-      <div class="modal-content" :style="{ background: 'rgba(30, 30, 40, 0.95)', border: '1px solid ' + primaryColor }">
-        <div class="modal-header" :style="{ borderBottom: '1px solid rgba(255,255,255,0.1)' }">
+      <div class="modal-content" :style="{ background: 'rgba(var(--p-dark-rgb), 0.95)', border: '1px solid ' + primaryColor }">
+        <div class="modal-header" :style="{ borderBottom: '1px solid rgba(var(--p-white-rgb), 0.1)' }">
           <h5 class="modal-title" :style="{ color: primaryColor }">
-            <i class="fa-solid fa-file-code me-2"></i>SPICE Netlist<span v-if="spiceCodeTopology"> - {{ spiceCodeTopology }}</span>
+            <i class="pi pi-file-code mr-2"></i>SPICE Netlist<span v-if="spiceCodeTopology"> - {{ spiceCodeTopology }}</span>
           </h5>
           <button type="button" class="btn-close btn-close-white" @click="closeSpiceCodeModal"></button>
         </div>
         <div class="modal-body">
           <div style="position: relative;">
             <button 
-              class="btn btn-sm btn-outline-light position-absolute" 
+              class="p-button p-button-sm btn-outline-light position-absolute" 
               style="top: 8px; left: 8px; z-index: 10; padding: 4px 8px; font-size: 0.75rem;"
               @click="copySpiceCodeToClipboard"
               title="Copy to clipboard"
             >
-              <i class="fa-solid fa-copy"></i>
+              <i class="pi pi-copy"></i>
             </button>
-            <pre class="p-3 rounded" :style="{ background: 'rgba(0,0,0,0.5)', color: '#d4d4d4', maxHeight: '60vh', overflow: 'auto', fontSize: '0.75rem', fontFamily: 'monospace', border: '1px solid rgba(255,255,255,0.1)', paddingTop: '40px' }"><code>{{ spiceCode }}</code></pre>
+            <pre class="p-3 rounded" :style="{ background: 'rgba(var(--p-black-rgb), 0.5)', color: 'var(--p-light)', maxHeight: '60vh', overflow: 'auto', fontSize: '0.75rem', fontFamily: 'monospace', border: '1px solid rgba(var(--p-white-rgb), 0.1)', paddingTop: '40px' }"><code>{{ spiceCode }}</code></pre>
           </div>
         </div>
-        <div class="modal-footer" :style="{ borderTop: '1px solid rgba(255,255,255,0.1)' }">
-          <button class="btn btn-sm" @click="copySpiceCodeToClipboard" :style="{ color: 'white', borderColor: 'white', backgroundColor: justCopied ? 'rgba(255,255,255,0.2)' : 'transparent' }">
-            <i class="fa-solid fa-copy me-1"></i>{{ justCopied ? 'Copied' : 'Copy to Clipboard' }}
+        <div class="modal-footer" :style="{ borderTop: '1px solid rgba(var(--p-white-rgb), 0.1)' }">
+          <button class="p-button p-button-sm" @click="copySpiceCodeToClipboard" :style="{ color: 'var(--p-white)', borderColor: 'var(--p-white)', backgroundColor: justCopied ? 'rgba(var(--p-white-rgb), 0.2)' : 'transparent' }">
+            <i class="pi pi-copy mr-1"></i>{{ justCopied ? 'Copied' : 'Copy to Clipboard' }}
           </button>
-          <button class="btn btn-primary btn-sm" @click="closeSpiceCodeModal">Close</button>
+          <button class="p-button p-button-primary btn-sm" @click="closeSpiceCodeModal">Close</button>
         </div>
       </div>
     </div>
@@ -1156,7 +1311,7 @@ export default {
 
 .wizard-icon {
   font-size: 1.75rem;
-  color: v-bind('primaryColor');
+  color: var(--om-primary);
 }
 
 .wizard-title-section {
@@ -1168,21 +1323,21 @@ export default {
 .wizard-title { 
   font-size: 1.4rem; 
   font-weight: 600; 
-  color: v-bind('primaryColor');
+  color: var(--om-primary);
   margin: 0;
   letter-spacing: -0.02em;
 }
 
 .wizard-subtitle {
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(var(--p-white-rgb), 0.6);
   margin: 0;
   font-weight: 400;
 }
 
 /* Card styles - using primary color tones */
-.compact-card { background: rgba(30, 30, 40, 0.6); border: 1px solid v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.2)"'); border-radius: 8px; overflow: hidden; }
-.compact-header { padding: 6px 10px; background: v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.1)"'); border-bottom: 1px solid v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.15)"'); font-size: 0.8rem; font-weight: 500; color: v-bind('primaryColor'); }
+.compact-card { background: rgba(var(--p-dark-rgb), 0.6); border: 1px solid rgb(from var(--om-primary) r g b / 0.2); border-radius: 8px; overflow: hidden; }
+.compact-header { padding: 6px 10px; background: rgb(from var(--om-primary) r g b / 0.1); border-bottom: 1px solid rgb(from var(--om-primary) r g b / 0.15); font-size: 0.8rem; font-weight: 500; color: var(--om-primary); }
 .compact-body { padding: 8px; }
 
 /* Schematic */
@@ -1196,45 +1351,49 @@ export default {
 /* Action Buttons - using primary color tones */
 .action-btns { display: flex; gap: 8px; }
 .action-btn-sm { padding: 6px 14px; border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; border: none; }
-.action-btn-sm.primary { background: linear-gradient(135deg, v-bind('primaryColor') 0%, v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.7)"') 100%); color: white; }
-.action-btn-sm.secondary { background: v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.15)"'); border: 1px solid v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.3)"'); color: v-bind('primaryColor'); }
+.action-btn-sm.primary { background: linear-gradient(135deg, var(--om-primary) 0%, rgb(from var(--om-primary) r g b / 0.7) 100%); color: var(--p-white); }
+.action-btn-sm.secondary { background: rgb(from var(--om-primary) r g b / 0.15); border: 1px solid rgb(from var(--om-primary) r g b / 0.3); color: var(--om-primary); }
 .action-btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Sim Buttons - using primary color tones */
 .sim-btns { display: flex; gap: 4px; }
-.sim-btn { background: linear-gradient(135deg, v-bind('primaryColor') 0%, v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.7)"') 100%); border: none; border-radius: 4px; padding: 4px 10px; color: white; font-size: 0.7rem; font-weight: 500; cursor: pointer; }
-.sim-btn.analytical { background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); }
-.sim-btn.spice { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); }
+.sim-btn { background: linear-gradient(135deg, var(--om-primary) 0%, rgb(from var(--om-primary) r g b / 0.7) 100%); border: none; border-radius: 4px; padding: 4px 10px; color: var(--p-white); font-size: 0.7rem; font-weight: 500; cursor: pointer; }
+.sim-btn.analytical { background: linear-gradient(135deg, var(--p-secondary) 0%, var(--p-gray-700) 100%); }
+.sim-btn.spice { background: linear-gradient(135deg, var(--p-info) 0%, rgb(from var(--p-info) r g b / 0.75) 100%); }
 .sim-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Periods selector - using primary color tones */
 .periods-selector { display: flex; align-items: center; gap: 4px; }
-.periods-label { font-size: 0.75rem; color: #888; }
-.periods-select { background: v-bind('headerBgStyle["background-color"] || "#1a1a2e"'); border: 1px solid v-bind('"rgba(" + primaryRgb.r + ", " + primaryRgb.g + ", " + primaryRgb.b + ", 0.3)"'); border-radius: 4px; padding: 2px 6px; font-size: 0.75rem; color: inherit; }
+.periods-label { font-size: 0.75rem; color: var(--p-secondary); }
+.periods-select { background: rgba(var(--p-dark-rgb), 0.8); border: 1px solid rgb(from var(--om-primary) r g b / 0.3); border-radius: 4px; padding: 2px 6px; font-size: 0.75rem; color: inherit; }
 
 /* Design mode radio buttons */
 .design-mode-selector { display: flex; flex-direction: column; gap: 4px; }
-.design-mode-option { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.8rem; color: v-bind('$styleStore?.wizard?.inputTextColor?.color || $styleStore?.wizard?.inputTextColor || "#ccc"'); }
-.design-mode-option input[type="radio"] { accent-color: v-bind('primaryColor'); }
+.design-mode-option { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.8rem; color: var(--om-white); }
+.design-mode-option input[type="radio"] { accent-color: var(--om-primary); }
 .design-mode-label { font-size: 0.8rem; }
 
 /* Computed value display */
 .computed-value-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 0.8rem; }
-.computed-label { color: v-bind('$styleStore?.wizard?.inputTextColor?.color || $styleStore?.wizard?.inputTextColor || "#aaa"'); }
-.computed-value { color: v-bind('primaryColor'); font-weight: 500; }
+.computed-label { color: var(--om-white); opacity: 0.7; }
+.computed-value { color: var(--om-primary); font-weight: 500; }
 
 /* Waveform items */
 .waveform-item { margin-bottom: 8px; }
 
 /* Empty state */
-.empty-state-compact { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.3); font-size: 0.9rem; gap: 8px; }
+.empty-state-compact { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(var(--p-white-rgb), 0.3); font-size: 0.9rem; gap: 8px; }
 .empty-state-compact i { font-size: 2rem; }
 
 /* Error text */
-.error-text { color: #ff6b6b; font-size: 0.8rem; }
+.error-text { color: var(--p-danger); font-size: 0.8rem; }
 
 /* Form check */
 .form-check-label.small { font-size: 0.75rem; }
+/* Breathing room between the checkbox and its label, across all wizards.
+   Scoped to .wizard-container so it doesn't affect checkboxes elsewhere
+   (this style block is global). Wizard checkboxes are slotted inside it. */
+.wizard-container .form-check-label { padding-left: 0.4rem; }
 
 /* Responsive */
 @media (max-width: 1199px) {

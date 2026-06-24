@@ -3,7 +3,7 @@ import { useMasStore } from '../../../../stores/mas'
 import { Chart,
          registerables } from 'chart.js'
 import { removeTrailingZeroes,
-         roundWithDecimals } from '/WebSharedComponents/assets/js/utils.js'
+         roundWithDecimals } from 'WebSharedComponents/assets/js/utils.js'
 import 'chartjs-plugin-dragdata'
 </script>
 
@@ -41,7 +41,7 @@ export default {
                         pointRadius: this.enableDrag ? 2.5 : 0,
                         pointHoverRadius: this.enableDrag ? 4 : 0,
                         pointHitRadius: this.enableDrag ? 6 : 0,
-                        pointHoverBorderColor: '#ffffff',
+                        pointHoverBorderColor: 'var(--p-white)',
                         pointHoverBorderWidth: 1,
                         pointHoverBackgroundColor: this.$styleStore.operatingPoints.currentGraph.color,
                         borderWidth: this.enableDrag ? 2.25 : 1.85,
@@ -49,7 +49,7 @@ export default {
                         cubicInterpolationMode: this.enableDrag ? 'default' : 'monotone',
                         spanGaps: true,
                         borderColor: this.$styleStore.operatingPoints.currentGraph.color,
-                        backgroundColor: 'rgba(177, 138, 234, 0.12)',
+                        backgroundColor: 'rgba(var(--p-info-rgb), 0.12)',
                         fill: this.enableDrag ? false : 'origin',
                     },
                     {
@@ -61,14 +61,14 @@ export default {
                         pointRadius: this.enableDrag ? 2.5 : 0,
                         pointHoverRadius: this.enableDrag ? 4 : 0,
                         pointHitRadius: this.enableDrag ? 6 : 0,
-                        pointHoverBorderColor: '#ffffff',
+                        pointHoverBorderColor: 'var(--p-white)',
                         pointHoverBorderWidth: 1,
                         pointHoverBackgroundColor: this.$styleStore.operatingPoints.voltageGraph.color,
                         borderWidth: this.enableDrag ? 2.25 : 1.85,
                         tension: this.enableDrag ? 0 : 0.05,
                         spanGaps: true,
                         borderColor: this.$styleStore.operatingPoints.voltageGraph.color,
-                        backgroundColor: 'rgba(0, 182, 255, 0.1)',
+                        backgroundColor: 'rgba(var(--p-success-rgb), 0.1)',
                         fill: this.enableDrag ? false : 'origin',
                     },
                     {
@@ -79,7 +79,7 @@ export default {
                         borderWidth: 1,
                         spanGaps: true,
                         pointRadius: 0,
-                        borderColor: 'rgba(255, 255, 255, 0.18)',
+                        borderColor: 'rgba(var(--p-white-rgb), 0.18)',
                         backgroundColor: 'transparent',
                     }
                 ]
@@ -142,7 +142,7 @@ export default {
                         e.target.style.cursor = 'grabbing';
                         const originalValue = value;
                         const label = this.modelValue[this.getSignalDescriptor(datasetIndex)]?.processed?.label;
-                        if (label == "Sinusoidal") {
+                        if (label == "sinusoidal") {
                             this.roundValue(datasetIndex, index, value, 1 / modelValue.frequency / 100, this.getYPrecision(datasetIndex));
                         }
                         this.processByType(datasetIndex, index, value)
@@ -188,10 +188,10 @@ export default {
                     }
                 },
                 tooltip: {
-                    backgroundColor: 'rgba(20, 20, 20, 0.92)',
-                    titleColor: '#f2f2f2',
-                    bodyColor: '#f2f2f2',
-                    borderColor: 'rgba(var(--bs-primary-rgb), 0.6)',
+                    backgroundColor: 'rgba(var(--p-dark-rgb), 0.92)',
+                    titleColor: 'var(--p-light)',
+                    bodyColor: 'var(--p-light)',
+                    borderColor: 'rgba(var(--p-primary-rgb), 0.6)',
                     borderWidth: 1,
                     padding: 8,
                     cornerRadius: 6,
@@ -219,7 +219,7 @@ export default {
                     max: 15,
                     min: -15,
                     grid: {
-                        color: 'rgba(177, 138, 234, 0.12)',
+                        color: 'rgba(255, 185, 78, 0.18)',
                         drawBorder: false,
                         lineWidth: 1,
                     },
@@ -249,7 +249,7 @@ export default {
                     type: 'linear',
                     ticks: {
                         beginAtZero: true,
-                        color: 'rgba(242, 242, 242, 0.7)',
+                        color: 'rgba(212, 212, 212, 0.9)',
                         font: { size: 10, weight: '500' },
                         padding: 4,
                         maxRotation: 0,
@@ -261,12 +261,12 @@ export default {
                         }
                     },
                     grid: {
-                        color: 'rgba(255, 255, 255, 0.05)',
+                        color: 'rgba(212, 212, 212, 0.08)',
                         drawBorder: false,
                         lineWidth: 1,
                     },
                     border: {
-                        color: 'rgba(255, 255, 255, 0.15)',
+                        color: 'rgba(212, 212, 212, 0.25)',
                     },
                 }
             },
@@ -454,32 +454,32 @@ export default {
         disableDragXByType(datasetIndex, index) {
             const signalDescriptor = this.getSignalDescriptor(datasetIndex)
             const label = this.modelValue[signalDescriptor]?.processed?.label;
-            if (label == "Triangular") {
+            if (label == "triangular") {
                 if (index == 0 || index == 2) {
                     chart.options.plugins.dragData.dragX = false;
                 }
             }
-            else if (label == "Rectangular" ) {
+            else if (label == "rectangular" ) {
                 if (index == 0 || index == 1 || index == 4) {
                     chart.options.plugins.dragData.dragX = false;
                 }
             }
-            else if (label == "Unipolar Triangular") {
+            else if (label == "unipolarTriangular") {
                 if (index == 0 || index == 4) {
                     chart.options.plugins.dragData.dragX = false;
                 }
             }
-            else if (label == "Unipolar Rectangular" || label == "Flyback Primary") {
+            else if (label == "unipolarRectangular" || label == "flybackPrimary") {
                 if (index == 0 || index == 1 || index == 4) {
                     chart.options.plugins.dragData.dragX = false;
                 }
             }
-            else if (label == "Flyback Secondary") {
+            else if (label == "flybackSecondary") {
                 if (index == 0 || index == 3 || index == 4) {
                     chart.options.plugins.dragData.dragX = false;
                 }
             }
-            else if (label == "Bipolar Rectangular") {
+            else if (label == "bipolarRectangular") {
                 if (index == 0 || index == 9) {
                     chart.options.plugins.dragData.dragX = false;
                 }
@@ -487,10 +487,10 @@ export default {
                     chart.options.plugins.dragData.dragY = false;
                 }
             }
-            else if (label == "Sinusoidal") {
+            else if (label == "sinusoidal") {
                  chart.options.plugins.dragData.dragX = false;
             }
-            else if (!label || label == "Custom") {
+            else if (!label || label == "custom") {
                 if (index == 0 || index == (chart.data.datasets[datasetIndex].data.length - 1)) {
                     chart.options.plugins.dragData.dragX = false;
                 }
@@ -499,15 +499,15 @@ export default {
         processByType(datasetIndex, index, value) {
             const signalDescriptor = this.getSignalDescriptor(datasetIndex)
             const label = this.modelValue[signalDescriptor]?.processed?.label;
-            if (label == "Triangular") {
+            if (label == "triangular") {
                 this.checkHorizontalLimits(chart.data.datasets[datasetIndex].data, index, value);
                 this.synchronizeExtremes(datasetIndex, index, value);
             }
-            else if (!label || label == "Custom") {
+            else if (!label || label == "custom") {
                 this.checkHorizontalLimits(chart.data.datasets[datasetIndex].data, index, value);
                 this.synchronizeExtremes(datasetIndex, index, value);
             }
-            else if (label == "Rectangular") {
+            else if (label == "rectangular") {
                 const data = chart.data.datasets[datasetIndex].data
                 switch (index) {
                     case 0:
@@ -552,7 +552,7 @@ export default {
                     break;
                 }
             }
-            else if (label == "Unipolar Rectangular") {
+            else if (label == "unipolarRectangular") {
                 const data = chart.data.datasets[datasetIndex].data
                 switch (index) {
                     case 0:
@@ -578,7 +578,7 @@ export default {
                     break;
                 }
             }
-            else if (label == "Flyback Primary") {
+            else if (label == "flybackPrimary") {
                 const data = chart.data.datasets[datasetIndex].data
                 switch (index) {
                     case 0:
@@ -600,7 +600,7 @@ export default {
                     break;
                 }
             }
-            else if (label == "Flyback Secondary") {
+            else if (label == "flybackSecondary") {
                 const data = chart.data.datasets[datasetIndex].data
                 switch (index) {
                     case 0:
@@ -621,7 +621,7 @@ export default {
                     break;
                 }
             }
-            else if (label == "Unipolar Triangular") {
+            else if (label == "unipolarTriangular") {
                 const data = chart.data.datasets[datasetIndex].data
                 switch (index) {
                     case 0:
@@ -642,7 +642,7 @@ export default {
                     break;
                 }
             }
-            else if (label == "Bipolar Rectangular") {
+            else if (label == "bipolarRectangular") {
                 var data = chart.data.datasets[datasetIndex].data
                 var dc
                 var firstValue = data[2].y
@@ -723,7 +723,7 @@ export default {
                         {x: period, y: 0 }]
                 chart.data.datasets[datasetIndex].data = data
             }
-            else if (label == "Sinusoidal") {
+            else if (label == "sinusoidal") {
                 const numberPoints = chart.data.datasets[datasetIndex].data.length - 1
                 const indexAngle = index * 2 * Math.PI / numberPoints
                 const maxMin = this.getMaxMinInPoints(chart.data.datasets[datasetIndex].data, 'y')

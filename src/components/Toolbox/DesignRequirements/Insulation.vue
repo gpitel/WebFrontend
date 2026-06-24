@@ -1,11 +1,11 @@
 <script setup>
-import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import SeveralElementsFromList from '/WebSharedComponents/DataInput/SeveralElementsFromList.vue'
-import { minimumMaximumScalePerParameter} from '/WebSharedComponents/assets/js/defaults.js'
-import { Cti, InsulationType, OvervoltageCategory, PollutionDegree, InsulationStandards } from '/WebSharedComponents/assets/ts/MAS.ts'
-import * as Utils from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from 'WebSharedComponents/assets/js/utils.js'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import SeveralElementsFromList from 'WebSharedComponents/DataInput/SeveralElementsFromList.vue'
+import { minimumMaximumScalePerParameter} from 'WebSharedComponents/assets/js/defaults.js'
+import { CTI as Cti, InsulationType, OvervoltageCategory, PollutionDegree, InsulationStandards } from 'WebSharedComponents/assets/ts/MAS.ts'
+import * as Utils from 'WebSharedComponents/assets/js/utils.js'
 </script>
 
 <script>
@@ -41,11 +41,11 @@ export default {
         },
         valueFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         titleFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         labelBgColor: {
             type: [String, Object],
@@ -69,6 +69,26 @@ export default {
         }
     },
     computed: {
+        ctiLabels() {
+            return { groupI: 'Group I', groupII: 'Group II', groupIIIA: 'Group IIIA', groupIIIB: 'Group IIIB' };
+        },
+        insulationTypeLabels() {
+            const out = {};
+            Object.values(InsulationType).forEach(v => { out[v] = v.charAt(0).toUpperCase() + v.slice(1); });
+            return out;
+        },
+        overvoltageCategoryLabels() {
+            // Values are already Roman numerals (II/III/IV) — show as "OVC II" etc.
+            const out = {};
+            Object.values(OvervoltageCategory).forEach(v => { out[v] = `OVC ${v}`; });
+            return out;
+        },
+        pollutionDegreeLabels() {
+            // Values are PD1/PD2/PD3/PD4 — display with space.
+            const out = {};
+            Object.values(PollutionDegree).forEach(v => { out[v] = v.replace(/^PD/, 'PD '); });
+            return out;
+        },
     },
     watch: { 
     },
@@ -82,14 +102,14 @@ export default {
 <template>
     <div :data-cy="dataTestLabel + '-container'" class="ins-root">
         <div v-if="showTitle" class="ins-title" :data-cy="dataTestLabel + '-title'">
-            <i class="fa-solid fa-shield-halved"></i>
+            <i class="pi pi-shield"></i>
             <span>Insulation</span>
         </div>
 
         <!-- Section 1: Environment (altitude + main supply voltage) -->
         <div class="ins-section">
             <div class="ins-section-header">
-                <i class="fa-solid fa-mountain-sun"></i>
+                <i class="pi pi-sun"></i>
                 <span>Environment</span>
             </div>
             <div class="ins-grid-2">
@@ -142,7 +162,7 @@ export default {
         <!-- Section 2: Classification (CTI / InsulationType / Overvoltage / Pollution) -->
         <div class="ins-section">
             <div class="ins-section-header">
-                <i class="fa-solid fa-list-check"></i>
+                <i class="pi pi-list"></i>
                 <span>Classification</span>
             </div>
             <div class="ins-grid-2">
@@ -154,6 +174,7 @@ export default {
                         :justifyContent="true"
                         v-model="modelValue['insulation']"
                         :options="Object.values(Cti)"
+                        :optionLabels="ctiLabels"
                         :labelWidthProportionClass="'col-6'"
                         :selectStyleClass="'col-6'"
                         :labelFontSize='valueFontSize'
@@ -172,6 +193,7 @@ export default {
                         :justifyContent="true"
                         v-model="modelValue['insulation']"
                         :options="Object.values(InsulationType)"
+                        :optionLabels="insulationTypeLabels"
                         :labelWidthProportionClass="'col-6'"
                         :selectStyleClass="'col-6'"
                         :labelFontSize='valueFontSize'
@@ -190,6 +212,7 @@ export default {
                         :justifyContent="true"
                         v-model="modelValue['insulation']"
                         :options="Object.values(OvervoltageCategory)"
+                        :optionLabels="overvoltageCategoryLabels"
                         :labelWidthProportionClass="'col-6'"
                         :selectStyleClass="'col-6'"
                         :labelFontSize='valueFontSize'
@@ -208,6 +231,7 @@ export default {
                         :justifyContent="true"
                         v-model="modelValue['insulation']"
                         :options="Object.values(PollutionDegree)"
+                        :optionLabels="pollutionDegreeLabels"
                         :labelWidthProportionClass="'col-6'"
                         :selectStyleClass="'col-6'"
                         :labelFontSize='valueFontSize'
@@ -224,7 +248,7 @@ export default {
         <!-- Section 3: Standards -->
         <div class="ins-section">
             <div class="ins-section-header">
-                <i class="fa-solid fa-certificate"></i>
+                <i class="pi pi-verified"></i>
                 <span>Standards</span>
             </div>
             <div class="ins-standards">
@@ -257,7 +281,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-weight: 700;
     font-size: 1rem;
     letter-spacing: 0.01em;
@@ -265,15 +289,15 @@ export default {
 }
 
 .ins-title i {
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.5));
 }
 
 /* ============ Sub-section ============ */
 .ins-section {
     background: linear-gradient(180deg,
-        rgba(var(--bs-primary-rgb), 0.05) 0%,
-        rgba(var(--bs-primary-rgb), 0.015) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+        rgba(var(--p-primary-rgb), 0.05) 0%,
+        rgba(var(--p-primary-rgb), 0.015) 100%);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.15);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -283,9 +307,9 @@ export default {
     align-items: center;
     gap: 0.4rem;
     padding: 0.35rem 0.7rem;
-    background: rgba(var(--bs-primary-rgb), 0.08);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
-    color: var(--bs-primary);
+    background: rgba(var(--p-primary-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.12);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.7rem;
     letter-spacing: 0.05em;
@@ -294,7 +318,7 @@ export default {
 
 .ins-section-header i {
     font-size: 0.78rem;
-    filter: drop-shadow(0 0 3px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 3px rgba(var(--p-primary-rgb), 0.45));
 }
 
 /* ============ Grid layouts ============ */
@@ -313,7 +337,7 @@ export default {
     padding: 0.55rem 0.7rem;
 }
 
-/* Tighten the inner Bootstrap rows generated by the child DataInput components */
+/* Tighten the inner rows generated by the child DataInput components */
 .ins-cell :deep(.row),
 .ins-standards :deep(.row) {
     margin-left: 0 !important;

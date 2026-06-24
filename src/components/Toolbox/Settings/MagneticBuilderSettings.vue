@@ -1,15 +1,16 @@
-<script setup >
-import { Modal } from "bootstrap";
+<script setup>
+import Dialog from 'primevue/dialog'
 import { useMagneticBuilderSettingsStore } from '/MagneticBuilder/src/stores/magneticBuilderSettings'
 import { useModelSettingsStore } from '/MagneticBuilder/src/stores/modelSettings'
 import { useMasStore } from '/src/stores/mas'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 </script>
 
 <script>
 
 export default {
-    emits: ["onSettingsUpdated"],
+    components: { Dialog },
+    emits: ["onSettingsUpdated", "update:visible"],
     props: {
         dataTestLabel: {
             type: String,
@@ -27,6 +28,7 @@ export default {
             type: String,
             default: 'col-5'
         },
+        visible: { type: Boolean, default: false },
     },
     data() {
         const magneticBuilderSettingsStore = useMagneticBuilderSettingsStore();
@@ -40,11 +42,14 @@ export default {
             allowDistributedGaps: this.$settingsStore.magneticBuilderSettings.allowDistributedGaps,
             allowStacks: this.$settingsStore.magneticBuilderSettings.allowStacks,
             allowToroidalCores: this.$settingsStore.magneticBuilderSettings.allowToroidalCores,
+            enableTemperatureFilter: this.$settingsStore.adviserSettings.enableTemperatureFilter,
+            maximumTemperature: this.$settingsStore.adviserSettings.maximumTemperature,
             enableVisualizers: magneticBuilderSettingsStore.enableVisualizers,
             enableSimulation: this.$settingsStore.magneticBuilderSettings.enableSimulation,
             enableAutoSimulation: this.$settingsStore.magneticBuilderSettings.enableAutoSimulation,
             enableSubmenu: magneticBuilderSettingsStore.enableSubmenu,
             enableGraphs: magneticBuilderSettingsStore.enableGraphs,
+            enableDebugConsole: this.$settingsStore.magneticBuilderSettings.enableDebugConsole,
         }
         return {
             magneticBuilderSettingsStore,
@@ -60,6 +65,16 @@ export default {
             this.$settingsStore.magneticBuilderSettings[setting] = this.localData[setting];
             this.settingsChanged = true;
         },
+        onAdviserSettingChanged(setting) {
+            this.localData[setting] = !this.localData[setting];
+            this.$settingsStore.adviserSettings[setting] = this.localData[setting];
+            this.settingsChanged = true;
+        },
+        onMaxTemperatureChanged(value) {
+            this.localData.maximumTemperature = parseFloat(value);
+            this.$settingsStore.adviserSettings.maximumTemperature = this.localData.maximumTemperature;
+            this.settingsChanged = true;
+        },
         onMagneticBuilderSettingChanged(setting) {
             this.localData[setting] = !this.localData[setting];
             this.magneticBuilderSettingsStore[setting] = this.localData[setting];
@@ -70,7 +85,7 @@ export default {
             this.settingsChanged = true;
         },
         onSettingsUpdated(event) {
-            this.$refs.closeSettingsModalRef.click();
+            this.$emit('update:visible', false);
             this.$emit('onSettingsUpdated');
         },
         onModelChanged(modelType, value) {
@@ -155,20 +170,24 @@ export default {
 
 
 <template>
-    <div class="modal fade" :id="modalName" tabindex="-1" aria-labelledby="settingsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-md modal-dialog-centered settings">
-            <div class="modal-content border-0 shadow-lg settings-modal-bg">
-                <div class="modal-header border-bottom border-secondary px-4 py-3">
-                    <div class="d-flex align-items-center">
-                        <i class="fa-solid fa-gear text-primary me-2 fs-5"></i>
-                        <h5 data-cy="settingsModal-notification-text" class="modal-title text-white mb-0" id="settingsModalLabel">Settings</h5>
-                    </div>
-                    <button ref="closeSettingsModalRef" type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="settingsModalClose"></button>
-                </div>
-                <div class="modal-body px-4 py-3">
+    <Dialog
+        :visible="visible"
+        @update:visible="(v) => $emit('update:visible', v)"
+        :modal="true"
+        :draggable="false"
+        :data-cy="modalName"
+        :style="{ width: 'min(90vw, 720px)' }"
+        :pt="{ root: { class: 'settings' } }">
+        <template #header>
+            <div class="d-flex align-items-center">
+                <i class="pi pi-cog text-primary mr-2 text-xl"></i>
+                <h5 data-cy="settingsModal-notification-text" class="modal-title text-white mb-0">Settings</h5>
+            </div>
+        </template>
+        <div class="modal-body px-4 py-3">
                     <!-- Core Selection Section -->
                     <div class="mb-3">
-                        <h6 class="text-secondary text-uppercase small fw-bold mb-3">Core Selection</h6>
+                        <h6 class="text-secondary text-uppercase small font-bold mb-3">Core Selection</h6>
                         
                         <div class="setting-item d-flex justify-content-between align-items-center py-2 border-bottom border-secondary">
                             <div>
@@ -232,9 +251,43 @@ export default {
                         </div>
                     </div>
 
+                    <!-- Core Adviser Section -->
+                    <div class="mb-3">
+                        <h6 class="text-secondary text-uppercase small font-bold mb-3">Core Adviser</h6>
+
+                        <div class="setting-item d-flex justify-content-between align-items-center py-2" :class="localData.enableTemperatureFilter ? 'border-bottom border-secondary' : ''">
+                            <div>
+                                <span class="text-white">Enable temperature filter</span>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input
+                                    class="form-check-input custom-switch"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="localData.enableTemperatureFilter"
+                                    @change="onAdviserSettingChanged('enableTemperatureFilter')"
+                                >
+                            </div>
+                        </div>
+
+                        <div v-if="localData.enableTemperatureFilter" class="setting-item d-flex justify-content-between align-items-center py-2">
+                            <div>
+                                <span class="text-white">Maximum temperature (°C)</span>
+                            </div>
+                            <input
+                                type="number"
+                                class="form-control form-control-sm bg-dark text-white border-secondary"
+                                style="width: 80px"
+                                :value="localData.maximumTemperature"
+                                :min="25" :max="300" :step="5"
+                                @change="onMaxTemperatureChanged($event.target.value)"
+                            >
+                        </div>
+                    </div>
+
                     <!-- Display Section -->
                     <div class="mb-3">
-                        <h6 class="text-secondary text-uppercase small fw-bold mb-3">Display</h6>
+                        <h6 class="text-secondary text-uppercase small font-bold mb-3">Display</h6>
                         
                         <div class="setting-item d-flex justify-content-between align-items-center py-2 border-bottom border-secondary">
                             <div>
@@ -316,7 +369,7 @@ export default {
 
                     <!-- Simulation Section -->
                     <div class="mb-2">
-                        <h6 class="text-secondary text-uppercase small fw-bold mb-3">Simulation</h6>
+                        <h6 class="text-secondary text-uppercase small font-bold mb-3">Simulation</h6>
                         
                         <div class="setting-item d-flex justify-content-between align-items-center py-2 border-bottom border-secondary">
                             <div>
@@ -324,6 +377,7 @@ export default {
                             </div>
                             <div class="form-check form-switch">
                                 <input 
+                                    data-cy="Settings-Modal-enable-simulation-button"
                                     class="form-check-input custom-switch" 
                                     type="checkbox" 
                                     role="switch"
@@ -351,7 +405,7 @@ export default {
 
                     <!-- Simulation Models Section -->
                     <div class="mb-2" v-if="modelSettingsStore.isInitialized">
-                        <h6 class="text-secondary text-uppercase small fw-bold mb-3">Simulation Models</h6>
+                        <h6 class="text-secondary text-uppercase small font-bold mb-3">Simulation Models</h6>
                         
                         <!-- Magnetic Field Strength Model -->
                         <div class="setting-item py-2 border-bottom border-secondary">
@@ -365,7 +419,7 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="'white'"
+                                :textColor="'var(--p-white)'"
                                 @update="(name, value) => onModelChanged(name, value)"
                             />
                         </div>
@@ -382,7 +436,7 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="'white'"
+                                :textColor="'var(--p-white)'"
                                 @update="(name, value) => onModelChanged(name, value)"
                             />
                         </div>
@@ -399,7 +453,7 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="'white'"
+                                :textColor="'var(--p-white)'"
                                 @update="(name, value) => onModelChanged(name, value)"
                             />
                         </div>
@@ -408,7 +462,7 @@ export default {
                         <div class="setting-item d-flex justify-content-between align-items-center py-2 border-bottom border-secondary">
                             <div>
                                 <span class="text-white">Manual wire losses models</span>
-                                <small class="text-muted d-block">Override automatic model selection</small>
+                                <small class="text-color-secondary d-block">Override automatic model selection</small>
                             </div>
                             <div class="form-check form-switch">
                                 <input 
@@ -433,7 +487,7 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'white' : 'gray'"
+                                :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'var(--p-white)' : 'var(--p-secondary)'"
                                 :disabled="!modelSettingsStore.coilEnableUserWindingLossesModels"
                                 @update="(name, value) => onModelChanged(name, modelSettingsStore.coilEnableUserWindingLossesModels ? value : modelSettingsStore.windingSkinEffectLossesModel)"
                             />
@@ -451,7 +505,7 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'white' : 'gray'"
+                                :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'var(--p-white)' : 'var(--p-secondary)'"
                                 :disabled="!modelSettingsStore.coilEnableUserWindingLossesModels"
                                 @update="(name, value) => onModelChanged(name, modelSettingsStore.coilEnableUserWindingLossesModels ? value : modelSettingsStore.windingProximityEffectLossesModel)"
                             />
@@ -469,11 +523,11 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="isCoreLossesDisabled ? 'gray' : 'white'"
+                                :textColor="isCoreLossesDisabled ? 'var(--p-secondary)' : 'var(--p-white)'"
                                 :disabled="isCoreLossesDisabled"
                                 @update="(name, value) => onModelChanged(name, value)"
                             />
-                            <small class="text-muted" v-if="modelSettingsStore.availableCoreLossesMethodsError">
+                            <small class="text-color-secondary" v-if="modelSettingsStore.availableCoreLossesMethodsError">
                                 {{ modelSettingsStore.availableCoreLossesMethodsError }}
                             </small>
                         </div>
@@ -490,7 +544,7 @@ export default {
                                 :labelWidthProportionClass="'col-0'"
                                 :valueWidthProportionClass="'col-12'"
                                 :valueBgColor="'transparent'"
-                                :textColor="'white'"
+                                :textColor="'var(--p-white)'"
                                 @update="(name, value) => onModelChanged(name, value)"
                             />
                         </div>
@@ -499,8 +553,8 @@ export default {
                         <div class="setting-item py-2">
                             <label class="text-white mb-1 d-block small">Field Plot Resolution</label>
                             <div class="d-flex justify-content-between align-items-center mb-1">
-                                <small class="text-muted">Horizontal (X)</small>
-                                <span class="text-primary fw-bold small">{{ modelSettingsStore.painterNumberPointsX }}</span>
+                                <small class="text-color-secondary">Horizontal (X)</small>
+                                <span class="text-primary font-bold small">{{ modelSettingsStore.painterNumberPointsX }}</span>
                             </div>
                             <input
                                 type="range"
@@ -511,8 +565,8 @@ export default {
                                 v-model.number="modelSettingsStore.painterNumberPointsX"
                             >
                             <div class="d-flex justify-content-between align-items-center mb-1">
-                                <small class="text-muted">Vertical (Y)</small>
-                                <span class="text-primary fw-bold small">{{ modelSettingsStore.painterNumberPointsY }}</span>
+                                <small class="text-color-secondary">Vertical (Y)</small>
+                                <span class="text-primary font-bold small">{{ modelSettingsStore.painterNumberPointsY }}</span>
                             </div>
                             <input
                                 type="range"
@@ -522,30 +576,48 @@ export default {
                                 step="5"
                                 v-model.number="modelSettingsStore.painterNumberPointsY"
                             >
-                            <small class="text-muted d-block mt-1">Higher values = finer plots but slower rendering</small>
+                            <small class="text-white d-block mt-1" style="opacity: 0.7">Higher values = finer plots but slower rendering</small>
+                        </div>
+                    </div>
+
+                    <!-- Developer Section -->
+                    <div class="mb-2">
+                        <h6 class="text-secondary text-uppercase small font-bold mb-3">Developer</h6>
+
+                        <div class="setting-item d-flex justify-content-between align-items-center py-2">
+                            <div>
+                                <span class="text-white">Debug console</span>
+                                <small class="text-white d-block" style="opacity: 0.7">Show floating console for MKF logs</small>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input
+                                    class="form-check-input custom-switch"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="localData.enableDebugConsole"
+                                    @change="onSettingChanged('enableDebugConsole')"
+                                >
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer border-top border-secondary px-4 py-3">
-                    <button
-                        data-cy="Settings-Modal-reset-defaults-button"
-                        class="btn btn-outline-secondary px-4 me-2"
-                        @click="resetToDefaults"
-                    >
-                        Reset to Defaults
-                    </button>
-                    <button
-                        data-cy="Settings-Modal-update-settings-button"
-                        class="btn btn-primary px-4"
-                        data-bs-dismiss="modal"
-                        @click="onSettingsUpdated"
-                    >
-                        Done
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
+        <template #footer>
+            <button
+                data-cy="Settings-Modal-reset-defaults-button"
+                class="p-button p-button-outlined p-button-secondary px-4 mr-2"
+                @click="resetToDefaults"
+            >
+                Reset to Defaults
+            </button>
+            <button
+                data-cy="Settings-Modal-update-settings-button"
+                class="p-button p-button-primary px-4"
+                @click="onSettingsUpdated"
+            >
+                Done
+            </button>
+        </template>
+    </Dialog>
 </template>
 
 <style scoped>
@@ -560,16 +632,16 @@ export default {
 }
 
 .custom-switch:checked {
-    background-color: #0d6efd;
-    border-color: #0d6efd;
+    background-color: var(--p-primary);
+    border-color: var(--p-primary);
 }
 
 .custom-switch:focus {
-    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    box-shadow: 0 0 0 0.25rem rgba(var(--p-primary-rgb), 0.25);
 }
 
 .setting-item:hover {
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(var(--p-white-rgb), 0.03);
     margin-left: -0.5rem;
     margin-right: -0.5rem;
     padding-left: 0.5rem;
@@ -578,6 +650,6 @@ export default {
 }
 
 .settings-modal-bg {
-    background: var(--bs-dark);
+    background: var(--p-dark);
 }
 </style>

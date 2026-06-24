@@ -2,8 +2,10 @@
 import { useMasStore } from '../../../stores/mas'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { toTitleCase, removeTrailingZeroes, formatUnit, formatDimension, formatTemperature, formatInductance,
-         formatPower, formatResistance, deepCopy, downloadBase64asPDF, clean, download } from '/WebSharedComponents/assets/js/utils.js'
-import Magnetic2DVisualizer, { PLOT_MODES } from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
+         formatPower, formatResistance, deepCopy, downloadBase64asPDF, clean, download } from 'WebSharedComponents/assets/js/utils.js'
+import Magnetic2DVisualizer, { PLOT_MODES } from 'WebSharedComponents/Common/Magnetic2DVisualizer.vue'
+import { waitForMkf } from 'WebSharedComponents/assets/js/mkfRuntime'
+import { initMvbWorker, buildMagneticSTEP } from 'WebSharedComponents/assets/js/mvbRuntime.js'
 
 </script>
 
@@ -59,40 +61,26 @@ export default {
             setTimeout(() => this.masExported = false, 2000);
         },
         async exportCore3D(format) {
+            if (format !== 'STP') {
+                console.warn('[Finalizer] Only STP export is supported via WASM (OBJ not yet implemented)');
+                return;
+            }
             try {
-                var url;
-                if (format == "STP") {
-                    url = import.meta.env.VITE_API_ENDPOINT + '/core_compute_core_3d_model_stp';
+                await initMvbWorker();
+                const coreAux = deepCopy(this.masStore.mas.magnetic.core);
+                coreAux.geometricalDescription = null;
+                coreAux.processedDescription = null;
+                if (coreAux.functionalDescription?.shape?.familySubtype == null) {
+                    coreAux.functionalDescription.shape.familySubtype = '1';
                 }
-                else if (format == "OBJ") {
-                    url = import.meta.env.VITE_API_ENDPOINT + '/core_compute_core_3d_model_obj';
-                }
-                if (this.masStore.mas.magnetic.core.functionalDescription.shape.familySubtype == null) {
-                    this.masStore.mas.magnetic.core.functionalDescription.shape.familySubtype = "1";
-                }
-
-                const aux = deepCopy( this.masStore.mas.magnetic.core);
-                aux['geometricalDescription'] = null;
-                aux['processedDescription'] = null;
-                var core = await this.taskQueueStore.calculateCoreData(aux, false);
-
-
-                this.$axios.post(url, core)
-                .then(response => {
-                    if (format == "STP") {
-                        download(response.data, this.masStore.mas.magnetic.core.name + ".stp", "text/plain");
-                    }
-                    else if (format == "OBJ") {
-                        download(response.data, this.masStore.mas.magnetic.core.name + ".obj", "text/plain");
-                    }
-                    this.Core3DExported = true;
-                    setTimeout(() => this.Core3DExported = false, 2000);
-                })
-                .catch(error => {
-                    console.error(error.data)
-                });
+                const magnetic = { core: coreAux };
+                const buf = await buildMagneticSTEP(magnetic, { includeBobbin: true });
+                const name = this.masStore.mas.magnetic.core.name ?? 'core';
+                download(buf, name + '.stp', 'binary/octet-stream; charset=utf-8');
+                this.Core3DExported = true;
+                setTimeout(() => this.Core3DExported = false, 2000);
             } catch (error) {
-                console.error(error);
+                console.error('[Finalizer exportCore3D]', error);
             }
         },
         exportMASWithExcitations() {
@@ -104,33 +92,45 @@ export default {
             this.masExported = true
             setTimeout(() => this.masExported = false, 2000);
         },
-        exportMagneticSectionPlot() {
-            const url = import.meta.env.VITE_API_ENDPOINT + '/plot_core'
-
-            this.$axios.post(url, {magnetic: this.masStore.mas.magnetic, operatingPoint: this.masStore.mas.inputs.operatingPoints[0]})
-            .then(response => {
-                download(response.data, this.masStore.mas.magnetic.manufacturerInfo.reference + "_Magnetic_Section.svg", "image/svg+xml");
-                this.MagneticSectionPlotExported = true
+        async exportMagneticSectionPlot() {
+            try {
+                const mkf = await waitForMkf();
+                await mkf.ready;
+                const svg = await mkf.plot_turns(JSON.stringify(this.masStore.mas.magnetic));
+                if (typeof svg === 'string' && svg.startsWith('Exception')) throw new Error(svg);
+                download(svg, this.masStore.mas.magnetic.manufacturerInfo.reference + "_Magnetic_Section.svg", "image/svg+xml");
+                this.MagneticSectionPlotExported = true;
                 setTimeout(() => this.MagneticSectionPlotExported = false, 2000);
-            })
-            .catch(error => {
-                console.error("Error plotting magnetic section")
-                console.error(error)
-            });
+            } catch (error) {
+                console.error("Error plotting magnetic section");
+                console.error(error);
+            }
         },
-        exportMagneticSectionAndFieldPlot() {
-            const url = import.meta.env.VITE_API_ENDPOINT + '/plot_core_and_fields'
-
-            this.$axios.post(url, {magnetic: this.masStore.mas.magnetic, operatingPoint: this.masStore.mas.inputs.operatingPoints[0], includeFringing: this.includeFringing})
-            .then(response => {
-                download(response.data, this.masStore.mas.magnetic.manufacturerInfo.reference + "_Magnetic_Section_And_H_Field.svg", "image/svg+xml");
-                this.MagneticSectionAndFieldPlotExported = true
-                setTimeout(() => this.MagneticSectionAndFieldPlotExported = false, 2000);
-            })
-            .catch(error => {
-                console.error("Error plotting magnetic section")
-                console.error(error)
-            });
+        async exportMagneticSectionAndFieldPlot() {
+            try {
+                const mkf = await waitForMkf();
+                await mkf.ready;
+                const settings = JSON.parse(await mkf.get_settings());
+                const previousFringing = settings.painterIncludeFringing;
+                settings.painterIncludeFringing = this.includeFringing;
+                await mkf.set_settings(JSON.stringify(settings));
+                try {
+                    const svg = await mkf.plot_magnetic_field(
+                        JSON.stringify(this.masStore.mas.magnetic),
+                        JSON.stringify(this.masStore.mas.inputs.operatingPoints[0])
+                    );
+                    if (typeof svg === 'string' && svg.startsWith('Exception')) throw new Error(svg);
+                    download(svg, this.masStore.mas.magnetic.manufacturerInfo.reference + "_Magnetic_Section_And_H_Field.svg", "image/svg+xml");
+                    this.MagneticSectionAndFieldPlotExported = true;
+                    setTimeout(() => this.MagneticSectionAndFieldPlotExported = false, 2000);
+                } finally {
+                    settings.painterIncludeFringing = previousFringing;
+                    await mkf.set_settings(JSON.stringify(settings));
+                }
+            } catch (error) {
+                console.error("Error plotting magnetic section");
+                console.error(error);
+            }
         },
 
         async calculateLeakageInductance() {
@@ -379,7 +379,11 @@ export default {
                 if (data.outputs[operatingPointIndex].coreLosses != null)
                 {
                     coreLossRow.coreLosses = {}
-                    const aux = formatPower(data.outputs[operatingPointIndex].coreLosses.coreLosses);
+                    const rawLoss = data.outputs[operatingPointIndex].coreLosses.coreLosses;
+                    if (rawLoss < 0) {
+                        console.error('[MagneticAdviser.Finalizer] Negative core losses received from MKF:', rawLoss, 'methodUsed:', data.outputs[operatingPointIndex].coreLosses.methodUsed, 'opIndex:', operatingPointIndex);
+                    }
+                    const aux = formatPower(rawLoss);
                     coreLossRow.coreLosses.text = 'Core losses';
                     coreLossRow.coreLosses.value = `${removeTrailingZeroes(aux.label, 2)} ${aux.unit}`;
                 }
@@ -514,149 +518,149 @@ export default {
 <template>
     <div class="container">
         <div class="row">
-            <div class="col-sm-12 col-md-2 text-start border border-primary" style="height: 75vh">
-                <button :disabled="masExported" :data-cy="dataTestLabel + '-download-MAS-File-button'" class="btn btn-primary col-12 mt-4" @click="exportMAS"> Download MAS file </button>
-                <button :disabled="masExported" :data-cy="dataTestLabel + '-download-MAS-Excitations-File-button'" class="btn btn-primary col-12 mt-4" @click="exportMASWithExcitations"> Download MAS file with excitations and results </button>
-                <button :disabled="Core3DExported" :data-cy="dataTestLabel + '-download-STP-File-button'" class="btn btn-primary col-12 mt-4" @click="exportCore3D('STP')"> Download Core STP model </button>
-                <button :disabled="Core3DExported" :data-cy="dataTestLabel + '-download-OBJ-File-button'" class="btn btn-primary col-12 mt-4" @click="exportCore3D('OBJ')"> Download Core OBJ model </button>
-                <button :disabled="MagneticSectionPlotExported" :data-cy="dataTestLabel + '-download-MagneticSectionPlot-File-button'" class="btn btn-primary col-12 mt-4" @click="exportMagneticSectionPlot">Download Magnetic Section</button>
-                <button :disabled="MagneticSectionAndFieldPlotExported" :data-cy="dataTestLabel + '-download-MagneticSectionAndFieldPlot-File-button'" class="btn btn-primary col-12 mt-4" @click="exportMagneticSectionAndFieldPlot">Download Magnetic Section with H field</button>
+            <div class="col-12 md:col-2 text-left border border-primary" style="height: 75vh">
+                <button :disabled="masExported" :data-cy="dataTestLabel + '-download-MAS-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportMAS"> Download MAS file </button>
+                <button :disabled="masExported" :data-cy="dataTestLabel + '-download-MAS-Excitations-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportMASWithExcitations"> Download MAS file with excitations and results </button>
+                <button :disabled="Core3DExported" :data-cy="dataTestLabel + '-download-STP-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportCore3D('STP')"> Download Core STP model </button>
+                <button :disabled="Core3DExported" :data-cy="dataTestLabel + '-download-OBJ-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportCore3D('OBJ')"> Download Core OBJ model </button>
+                <button :disabled="MagneticSectionPlotExported" :data-cy="dataTestLabel + '-download-MagneticSectionPlot-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportMagneticSectionPlot">Download Magnetic Section</button>
+                <button :disabled="MagneticSectionAndFieldPlotExported" :data-cy="dataTestLabel + '-download-MagneticSectionAndFieldPlot-File-button'" class="p-button p-button-primary col-12 mt-4" @click="exportMagneticSectionAndFieldPlot">Download Magnetic Section with H field</button>
             </div>
             <div class="col-10 row">
-                <h3 v-if="'manufacturerInfo' in masStore.mas.magnetic" class="col-12 p-0 m-0 fs-4">{{masStore.mas.magnetic.manufacturerInfo.reference}}</h3>
-                <div v-if="masStore.mas.magnetic.manufacturerInfo != null" class="col-sm-12 col-md-6 text-start pe-0 row">
-                    <div class="col-12 fs-4 p-0 m-0 mt-2 text-center fw-bold">Core data</div>
+                <h3 v-if="'manufacturerInfo' in masStore.mas.magnetic" class="col-12 p-0 m-0 text-2xl">{{masStore.mas.magnetic.manufacturerInfo.reference}}</h3>
+                <div v-if="masStore.mas.magnetic.manufacturerInfo != null" class="col-12 md:col-6 text-left pr-0 row">
+                    <div class="col-12 text-2xl p-0 m-0 mt-2 text-center font-bold">Core data</div>
                     <div>
-                        <div class="offset-1 col-10">
+                        <div class="col-offset-1 col-10">
                             <div class="row">
-                                <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Core Shape</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreShapeTable.name.text}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreShapeTable.name.value}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreShapeTable.numberStacks.text}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreShapeTable.numberStacks.value}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreShapeTable.effectiveLength.text}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreShapeTable.effectiveLength.value}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreShapeTable.effectiveArea.text}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreShapeTable.effectiveArea.value}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreShapeTable.effectiveVolume.text}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreShapeTable.effectiveVolume.value}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreShapeTable.minimumArea.text}}</div>
-                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreShapeTable.minimumArea.value}}</div>
+                                <div class="col-12 text-xl p-0 m-0 my-1 text-center">Core Shape</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreShapeTable.name.text}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreShapeTable.name.value}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreShapeTable.numberStacks.text}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreShapeTable.numberStacks.value}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreShapeTable.effectiveLength.text}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreShapeTable.effectiveLength.value}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreShapeTable.effectiveArea.text}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreShapeTable.effectiveArea.value}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreShapeTable.effectiveVolume.text}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreShapeTable.effectiveVolume.value}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreShapeTable.minimumArea.text}}</div>
+                                <div v-if="'coreShapeTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreShapeTable.minimumArea.value}}</div>
                             </div>
 
                             <div class="row">
-                                <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Core Gapping</div>
+                                <div class="col-12 text-xl p-0 m-0 my-1 text-center">Core Gapping</div>
                                     <div  v-if="'coreGappingTable' in localTexts" class="row p-0 m-0" v-for="(gap, gapIndex) in masStore.mas.magnetic.core.functionalDescription.gapping" :key="gapIndex">
-                                        <div v-if="gapIndex == 0" class="col-4 p-0 m-0 border ps-2">Type</div>
-                                        <div v-if="gapIndex == 0" class="col-4 p-0 m-0 border ps-2">Length</div>
-                                        <div v-if="gapIndex == 0" class="col-4 p-0 m-0 border ps-2">Height offset</div>
-                                        <div v-if="'coreGappingTable' in localTexts" class="col-4 p-0 m-0 border text-start ps-2">{{localTexts.coreGappingTable[gapIndex].type.value}}</div>
-                                        <div v-if="'coreGappingTable' in localTexts" class="col-4 p-0 m-0 border text-end pe-1">{{localTexts.coreGappingTable[gapIndex].length.value}}</div>
-                                        <div v-if="'coreGappingTable' in localTexts" class="col-4 p-0 m-0 border text-end pe-1">{{localTexts.coreGappingTable[gapIndex].heightOffset.value}}</div>
+                                        <div v-if="gapIndex == 0" class="col-4 p-0 m-0 border pl-2">Type</div>
+                                        <div v-if="gapIndex == 0" class="col-4 p-0 m-0 border pl-2">Length</div>
+                                        <div v-if="gapIndex == 0" class="col-4 p-0 m-0 border pl-2">Height offset</div>
+                                        <div v-if="'coreGappingTable' in localTexts" class="col-4 p-0 m-0 border text-left pl-2">{{localTexts.coreGappingTable[gapIndex].type.value}}</div>
+                                        <div v-if="'coreGappingTable' in localTexts" class="col-4 p-0 m-0 border text-right pr-1">{{localTexts.coreGappingTable[gapIndex].length.value}}</div>
+                                        <div v-if="'coreGappingTable' in localTexts" class="col-4 p-0 m-0 border text-right pr-1">{{localTexts.coreGappingTable[gapIndex].heightOffset.value}}</div>
                                     </div>
                             </div>
 
                             <div class="row">
-                                <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Material Parameters</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.name.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.name.value}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.manufacturer.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.manufacturer.value}}</div>
+                                <div class="col-12 text-xl p-0 m-0 my-1 text-center">Material Parameters</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.name.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.name.value}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.manufacturer.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.manufacturer.value}}</div>
 
-                                <div class="col-6 p-0 m-0 border text-center ps-2"></div>
+                                <div class="col-6 p-0 m-0 border text-center pl-2"></div>
                                 <div class="col-3 p-0 m-0 border text-center">25°C</div>
                                 <div class="col-3 p-0 m-0 border text-center">100°C</div>
 
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.permeanceTable.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.permeanceTable.value_25}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.permeanceTable.value_100}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.initialPermeabilityTable.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.initialPermeabilityTable.value_25}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.initialPermeabilityTable.value_100}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.effectivePermeabilityTable.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.effectivePermeabilityTable.value_25}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.effectivePermeabilityTable.value_100}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.resistivityTable.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.resistivityTable.value_25}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.resistivityTable.value_100}}</div>
-                                <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.magneticFluxDensitySaturationTable.text}}</div>
-                                <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.magneticFluxDensitySaturationTable.value_25}}</div>
-                                <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.magneticFluxDensitySaturationTable.value_100}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.curieTemperatureTable.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.curieTemperatureTable.value}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialTable.densityTable.text}}</div>
-                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialTable.densityTable.value}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.permeanceTable.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.permeanceTable.value_25}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.permeanceTable.value_100}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.initialPermeabilityTable.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.initialPermeabilityTable.value_25}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.initialPermeabilityTable.value_100}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.effectivePermeabilityTable.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.effectivePermeabilityTable.value_25}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.effectivePermeabilityTable.value_100}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.resistivityTable.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.resistivityTable.value_25}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.resistivityTable.value_100}}</div>
+                                <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.magneticFluxDensitySaturationTable.text}}</div>
+                                <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.magneticFluxDensitySaturationTable.value_25}}</div>
+                                <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.magneticFluxDensitySaturationTable.value_100}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.curieTemperatureTable.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.curieTemperatureTable.value}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialTable.densityTable.text}}</div>
+                                <div v-if="'coreMaterialTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialTable.densityTable.value}}</div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-12 fs-4 p-0 m-0 mt-2 text-center fw-bold">Coil data</div>
+                    <div class="col-12 text-2xl p-0 m-0 mt-2 text-center font-bold">Coil data</div>
                     <div>
-                        <div class="offset-1 col-10">
+                        <div class="col-offset-1 col-10">
                             <div class="row">
-                                <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Coil Global Parameters</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coilTable.sectionsInfo.text}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coilTable.sectionsInfo.value}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coilTable.layersInfo.text}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coilTable.layersInfo.value}}</div>
+                                <div class="col-12 text-xl p-0 m-0 my-1 text-center">Coil Global Parameters</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coilTable.sectionsInfo.text}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coilTable.sectionsInfo.value}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coilTable.layersInfo.text}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coilTable.layersInfo.value}}</div>
                             </div>
                         </div>
-                        <div class="offset-1 col-10">
+                        <div class="col-offset-1 col-10">
                             <div  v-if="'coilTable' in localTexts" class="row" v-for="(winding, windingIndex) in masStore.mas.magnetic.coil.functionalDescription" :key="windingIndex">
-                                <div class="col-12 fs-5 p-0 m-0 my-1 text-center">{{toTitleCase(winding.name.toLowerCase())}}</div>
+                                <div class="col-12 text-xl p-0 m-0 my-1 text-center">{{toTitleCase(winding.name.toLowerCase())}}</div>
 
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coilTable.windingInfo[windingIndex].turns.text}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coilTable.windingInfo[windingIndex].turns.value}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coilTable.windingInfo[windingIndex].parallels.text}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coilTable.windingInfo[windingIndex].parallels.value}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coilTable.windingInfo[windingIndex].wire.text}}</div>
-                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coilTable.windingInfo[windingIndex].wire.value}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coilTable.windingInfo[windingIndex].turns.text}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coilTable.windingInfo[windingIndex].turns.value}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coilTable.windingInfo[windingIndex].parallels.text}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coilTable.windingInfo[windingIndex].parallels.value}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coilTable.windingInfo[windingIndex].wire.text}}</div>
+                                <div v-if="'coilTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coilTable.windingInfo[windingIndex].wire.value}}</div>
                             </div>
                         </div>
 
                     </div>
-                    <div class="col-12 fs-4 p-0 m-0 mt-2 text-center fw-bold">Simulation result per Operating Point</div>
-                    <div class="offset-1 col-10 row mt-3" v-for="(operationPoint, operationPointIndex) in masStore.mas.inputs.operatingPoints" :key="operationPointIndex">
-                        <div class="col-12 fs-5 p-0 m-0 my-1 text-center">{{operationPoint.name}}</div>
-                        <div class="col-12 fs-5 p-0 m-0 mt-2 text-center">Core</div>
+                    <div class="col-12 text-2xl p-0 m-0 mt-2 text-center font-bold">Simulation result per Operating Point</div>
+                    <div class="col-offset-1 col-10 row mt-3" v-for="(operationPoint, operationPointIndex) in masStore.mas.inputs.operatingPoints" :key="operationPointIndex">
+                        <div class="col-12 text-xl p-0 m-0 my-1 text-center">{{operationPoint.name}}</div>
+                        <div class="col-12 text-xl p-0 m-0 mt-2 text-center">Core</div>
                         <div class="col-12 p-0 m-0 mt-2">
                             <div class="row">
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-start ps-2">{{localTexts.outputsTable.core[operationPointIndex].magnetizingInductance.text}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.outputsTable.core[operationPointIndex].magnetizingInductance.value}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-start ps-2">{{localTexts.outputsTable.core[operationPointIndex].coreLosses.text}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.outputsTable.core[operationPointIndex].coreLosses.value}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-start ps-2">{{localTexts.outputsTable.core[operationPointIndex].coreTemperature.text}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.outputsTable.core[operationPointIndex].coreTemperature.value}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-start ps-2">{{localTexts.outputsTable.core[operationPointIndex].magneticFluxDensityPeak.text}}</div>
-                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.outputsTable.core[operationPointIndex].magneticFluxDensityPeak.value}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-left pl-2">{{localTexts.outputsTable.core[operationPointIndex].magnetizingInductance.text}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.outputsTable.core[operationPointIndex].magnetizingInductance.value}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-left pl-2">{{localTexts.outputsTable.core[operationPointIndex].coreLosses.text}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.outputsTable.core[operationPointIndex].coreLosses.value}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-left pl-2">{{localTexts.outputsTable.core[operationPointIndex].coreTemperature.text}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.outputsTable.core[operationPointIndex].coreTemperature.value}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-left pl-2">{{localTexts.outputsTable.core[operationPointIndex].magneticFluxDensityPeak.text}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.outputsTable.core[operationPointIndex].magneticFluxDensityPeak.value}}</div>
                             </div>
                         </div>
-                        <div class="col-12 fs-5 p-0 m-0 mt-2 text-center">Coil</div>
+                        <div class="col-12 text-xl p-0 m-0 mt-2 text-center">Coil</div>
                         <div class="col-12 p-0 m-0 mt-2">
                             <div class="row" v-for="(winding, windingIndex) in masStore.mas.magnetic.coil.functionalDescription" :key="'coil-' + windingIndex">
 
-                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-start ps-2">Winding</div>
-                                <div v-if="windingIndex == 0" class="col-2 p-0 m-0 border text-center ps-2">DC Res.</div>
-                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center ps-2">Curr. Density</div>
-                                <div v-if="windingIndex == 0" class="col-2 p-0 m-0 border text-center ps-2">Wind. Loss</div>
-                                <div v-if="windingIndex == 0" class="col-2 p-0 m-0 border text-center ps-2">Leak. Ind.</div>
+                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-left pl-2">Winding</div>
+                                <div v-if="windingIndex == 0" class="col-2 p-0 m-0 border text-center pl-2">DC Res.</div>
+                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center pl-2">Curr. Density</div>
+                                <div v-if="windingIndex == 0" class="col-2 p-0 m-0 border text-center pl-2">Wind. Loss</div>
+                                <div v-if="windingIndex == 0" class="col-2 p-0 m-0 border text-center pl-2">Leak. Ind.</div>
 
-                                <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border  text-start ps-2">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].dcResistance.text}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border  text-left pl-2">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].dcResistance.text}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-2 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].dcResistance.value}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].currentDensity.value}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-2 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].windingLosses.value}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-2 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].leakageInductance.value}}</div>
                             </div>
                         </div>
-                        <div class="col-12 fs-5 p-0 m-0 mt-2 text-center">Coil Losses Breakdown</div>
+                        <div class="col-12 text-xl p-0 m-0 mt-2 text-center">Coil Losses Breakdown</div>
                         <div class="col-12 p-0 m-0 mt-2">
                             <div class="row " v-for="(winding, windingIndex) in masStore.mas.magnetic.coil.functionalDescription" :key="'breakdown-' + windingIndex">
 
-                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-start ps-2">Winding</div>
-                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center ps-2">Ohmic Loss</div>
-                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center ps-2">Skin Loss</div>
-                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center ps-2">Prox. Loss</div>
+                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-left pl-2">Winding</div>
+                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center pl-2">Ohmic Loss</div>
+                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center pl-2">Skin Loss</div>
+                                <div v-if="windingIndex == 0" class="col-3 p-0 m-0 border text-center pl-2">Prox. Loss</div>
 
-                                <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border text-start ps-2">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].ohmicLosses.text}}</div>
+                                <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border text-left pl-2">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].ohmicLosses.text}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].ohmicLosses.value}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].skinLosses.value}}</div>
                                 <div v-if="'outputsTable' in localTexts" class="col-3 p-0 m-0 border text-center">{{localTexts.outputsTable.coil[operationPointIndex][windingIndex].proximityLosses.value}}</div>
@@ -664,8 +668,8 @@ export default {
                         </div>
                     </div>
                 </div>
-                <div v-if="masStore.mas.magnetic.manufacturerInfo != null" class="col-sm-12 col-md-6 text-start pe-0">
-                    <div class="col-12 fs-5 p-0 m-0 mt-2 text-center">{{plotMode === PLOT_MODES.MAGNETIC_FIELD ? 'Core Coil and H Field' : plotMode === PLOT_MODES.ELECTRIC_FIELD ? 'Core Coil and E Field' : 'Core Coil'}}</div>
+                <div v-if="masStore.mas.magnetic.manufacturerInfo != null" class="col-12 md:col-6 text-left pr-0">
+                    <div class="col-12 text-xl p-0 m-0 mt-2 text-center">{{plotMode === PLOT_MODES.MAGNETIC_FIELD ? 'Core Coil and H Field' : plotMode === PLOT_MODES.ELECTRIC_FIELD ? 'Core Coil and E Field' : 'Core Coil'}}</div>
                     <Magnetic2DVisualizer
                         :modelValue="masStore.mas"
                         :enableZoom="false"

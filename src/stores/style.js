@@ -18,9 +18,26 @@ export const useStyleStore = defineStore("style", () => {
     const insulationAdviser = ref({});
     const catalogAdviser = ref({});
     const wizard = ref({});
+    const emiSpectrum = ref({});
+    const crossReferencer = ref({});
 
     function setTheme(theme) {
         this.theme = theme;
+
+        // Sync CSS custom properties so components can use var(--om-primary) etc.
+        const root = document.documentElement;
+        if (root) {
+            root.style.setProperty('--om-light', theme['light'] || '');
+            root.style.setProperty('--om-white', theme['white'] || '');
+            root.style.setProperty('--om-dark', theme['dark'] || '');
+            root.style.setProperty('--om-primary', theme['primary'] || '');
+            root.style.setProperty('--om-secondary', theme['secondary'] || '');
+            root.style.setProperty('--om-info', theme['info'] || '');
+            root.style.setProperty('--om-success', theme['success'] || '');
+            root.style.setProperty('--om-warning', theme['warning'] || '');
+            root.style.setProperty('--om-danger', theme['danger'] || '');
+            root.style.setProperty('--om-border-color', theme['primary'] || '');
+        }
 
         this.main = {
             "background-color": theme["dark"],
@@ -185,25 +202,28 @@ export const useStyleStore = defineStore("style", () => {
             commonParameterBgColor:{
                 "background-color": "transparent",
             },
+            // Unified palette so EVERYTHING tied to a current uses the same
+            // colour and likewise for voltage (chart line, legend, card header,
+            // induce button). Current = warning (amber), Voltage = primary (teal).
             currentGraph:{
-                "background-color": theme["info"],
-                "color": theme["info"],
+                "background-color": theme["warning"],
+                "color": theme["warning"],
             },
             voltageGraph:{
-                "background-color": theme["primary"],
-                "color": theme["primary"],
-            },
-            currentTextColor:{
+                "background-color": theme["info"],
                 "color": theme["info"],
             },
+            currentTextColor:{
+                "color": theme["warning"],
+            },
             voltageTextColor:{
-                "color": theme["primary"],
+                "color": theme["info"],
             },
             currentBgColor:{
-                "background-color": theme["info"],
+                "background-color": theme["warning"],
             },
             voltageBgColor:{
-                "background-color": theme["primary"],
+                "background-color": theme["info"],
             },
             graphBgColor:{
                 "background-color": theme["light"],
@@ -216,7 +236,9 @@ export const useStyleStore = defineStore("style", () => {
             },
             inputTitleFontSize: {
                 // "font-size": '2.5rem',
-                "font-size": '1.25rem',
+                // Match the Magnetic Builder label size so operating-point
+                // inputs (frequency, duty cycle, waveform fields) look identical.
+                "font-size": '1.15rem',
             },
             inputLabelBgColor:{
                 // Transparent so labels inherit the parent panel background.
@@ -351,12 +373,16 @@ export const useStyleStore = defineStore("style", () => {
 
 
             inputFontSize: {
-                // "font-size": '2rem',
                 "font-size": '1rem',
             },
             inputTitleFontSize: {
-                // "font-size": '2.5rem',
-                "font-size": '1.25rem',
+                "font-size": '1.15rem',
+            },
+            infoValueFontSize: {
+                "font-size": '0.95rem',
+            },
+            infoLabelFontSize: {
+                "font-size": '1rem',
             },
             inputLabelBgColor:{
                 "background-color": theme["dark"] + ' !important',
@@ -662,6 +688,37 @@ export const useStyleStore = defineStore("style", () => {
                 "color": theme["dark"],
             },
         };
+
+        this.emiSpectrum = {
+            bgColor:            theme["light"],
+            textColor:          theme["white"],
+            titleColor:         theme["white"],
+            inputBorderColor:   '#666666',
+            cutoffTextColor:    '#d4d4d4',
+            noteTextColor:      '#888888',
+            sourceLineColor:    '#ff7a7a',
+            filteredLineColor:  '#539796',
+            limitLineColor:     '#f5c518',
+        };
+
+        this.crossReferencer = {
+            inputFontSize: {
+                "font-size": '1rem',
+            },
+            inputTitleFontSize: {
+                "font-size": '1.25rem',
+            },
+            inputLabelBgColor: {
+                "background-color": "transparent !important",
+                "background-image": "none !important",
+            },
+            inputValueBgColor: {
+                "background-color": theme["light"],
+            },
+            inputTextColor: {
+                "color": theme["white"],
+            },
+        };
     }
 
 
@@ -681,6 +738,8 @@ export const useStyleStore = defineStore("style", () => {
         insulationAdviser,
         catalogAdviser,
         wizard,
+        emiSpectrum,
+        crossReferencer,
     }
 },
 {

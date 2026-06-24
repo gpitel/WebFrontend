@@ -1,7 +1,10 @@
 <script setup>
-import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from '/WebSharedComponents/assets/js/utils.js'
-import DimensionUnit from '/WebSharedComponents/DataInput/DimensionUnit.vue'
-
+import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from 'WebSharedComponents/assets/js/utils.js'
+import DimensionUnit from 'WebSharedComponents/DataInput/DimensionUnit.vue'
+import InputNumber from 'primevue/inputnumber'
+import InputGroup from 'primevue/inputgroup'
+import InputGroupAddon from 'primevue/inputgroupaddon'
+import Button from 'primevue/button'
 </script>
 
 <script>
@@ -40,11 +43,11 @@ export default {
         },
         valueFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         titleFontSize: {
             type: [String, Object],
-            default: 'fs-6'
+            default: ''
         },
         addButtonStyle: {
             type: Object,
@@ -68,7 +71,7 @@ export default {
         },
         errorTextColor: {
             type: [String, Object],
-            default: "text-danger",
+            default: "text-red-500",
         },
         unitExtraStyleClass:{
             type: String,
@@ -163,148 +166,163 @@ export default {
 </script>
 
 <template>
-    <div :data-cy="dataTestLabel + '-container'" class="container-flex p-0 m-0">
-        <div class="row">
+    <div :data-cy="dataTestLabel + '-container'" class="container-flex text-left">
+        <div class="mb-1">
             <label
                 :style="combinedStyle([titleFontSize, labelBgColor, textColor])"
                 :data-cy="dataTestLabel + '-title'"
-                class="rounded-2 col-sm-6 col-md-5 p-0"
                 :class="combinedClass([titleFontSize, labelBgColor, textColor])"
-            >
+                class="md-rounded p-0">
                 {{replaceTitle == null? 'Maximum Dimensions' : replaceTitle}}
             </label>
         </div>
-        <div class="row align-items-center">
-            <label
-                :style="combinedStyle([valueFontSize, labelBgColor, textColor])"
-                v-if="localData.width.scaledValue != null"
-                for="design-requirements-width-input"
-                :class="combinedClass([valueFontSize, labelBgColor, textColor])"
-                class="m-0 px-0 col-2 text-center"
-            >
-                Width
-            </label>
-            <input
-                :style="combinedStyle([disabled? labelBgColor : valueBgColor, localData.width.scaledValue <= 0? errorTextColor : textColor, valueFontSize ])"
-                v-if="localData.width.scaledValue != null"
-                type="number"
-                class="m-0 px-0 col-1"
-                :class="combinedClass([disabled? labelBgColor : valueBgColor, localData.width.scaledValue <= 0? errorTextColor : textColor, valueFontSize, disabled? 'border-0' : ''])"
-                id="design-requirements-width-input'"
-                :value="localData.width.scaledValue"
-                @change="changeScaledValue($event.target.value, 'width')"
-            />
-            <DimensionUnit
-                :min="min"
-                :max="max"
-                v-if="unit != null && localData.width.scaledValue != null"
-                :unit="unit"
-                :extraStyleClass="unitExtraStyleClass"
-                :valueBgColor="valueBgColor"
-                :valueFontSize="valueFontSize"
-                :textColor="textColor"
-                v-model="localData.width.multiplier"
-                class="m-0 col-1"
-                @update:modelValue="changeMultiplier('width')"
-            />
-            <button
-                v-if="localData.width.scaledValue == null"
-                :style="addButtonStyle"
-                :class="valueFontSize"
-                class="col-3 m-0 px-xl-3 px-md-0 btn mx-4"
-                @click="add('width')"
-            >
-            {{'Add Width'}}
-            </button>
-
-            <label
-                :style="combinedStyle([valueFontSize, labelBgColor, textColor])"
-                v-if="localData.height.scaledValue != null"
-                for="design-requirements-width-input"
-                :class="combinedClass([valueFontSize, labelBgColor, textColor])"
-                class="m-0 px-0 col-2 text-center"
-            >
-                Height
-            </label>
-            <input
-                :style="combinedStyle([disabled? labelBgColor : valueBgColor, localData.height.scaledValue <= 0? errorTextColor : textColor, valueFontSize ])"
-                v-if="localData.height.scaledValue != null"
-                type="number"
-                class="m-0 px-0 col-1"
-                :class="combinedClass([disabled? labelBgColor : valueBgColor, localData.height.scaledValue <= 0? errorTextColor : textColor, valueFontSize, disabled? 'border-0' : ''])"
-                id="design-requirements-width-input'"
-                @change="changeScaledValue($event.target.value, 'height')"
-                :value="localData.height.scaledValue"
-            />
-            <DimensionUnit
-                :min="min"
-                :max="max"
-                v-if="unit != null && localData.height.scaledValue != null"
-                :unit="unit"
-                :extraStyleClass="unitExtraStyleClass"
-                :valueBgColor="valueBgColor"
-                :valueFontSize="valueFontSize"
-                :textColor="textColor"
-                v-model="localData.height.multiplier"
-                class="m-0 col-1"
-                @update:modelValue="changeMultiplier('height')"
-            />
-            <button
-                v-if="localData.height.scaledValue == null"
-                :style="addButtonStyle"
-                :class="valueFontSize"
-                class="col-3 m-0 px-xl-3 px-md-0 btn mx-4"
-                @click="add('height')"
-            >
-            {{'Add Height'}}
-            </button>
-
-            <label
-                :style="combinedStyle([valueFontSize, labelBgColor, textColor])"
-                v-if="localData.depth.scaledValue != null"
-                for="design-requirements-width-input"
-                :class="combinedClass([valueFontSize, labelBgColor, textColor])"
-                class="m-0 px-0 col-2 text-center"
-            >
-                Depth
-            </label>
-            <input
-                :style="combinedStyle([disabled? labelBgColor : valueBgColor, localData.depth.scaledValue <= 0? errorTextColor : textColor, valueFontSize ])"
-                v-if="localData.depth.scaledValue != null"
-                type="number"
-                class="m-0 px-0 col-1"
-                :class="combinedClass([disabled? labelBgColor : valueBgColor, localData.depth.scaledValue <= 0? errorTextColor : textColor, valueFontSize, disabled? 'border-0' : ''])"
-                id="design-requirements-width-input'"
-                @change="changeScaledValue($event.target.value, 'depth')"
-                :value="localData.depth.scaledValue"
-            />
-            <DimensionUnit
-                :min="min"
-                :max="max"
-                v-if="unit != null && localData.depth.scaledValue != null"
-                :unit="unit"
-                :extraStyleClass="unitExtraStyleClass"
-                :valueBgColor="valueBgColor"
-                :valueFontSize="valueFontSize"
-                :textColor="textColor"
-                v-model="localData.depth.multiplier"
-                class="m-0 col-1"
-                @update:modelValue="changeMultiplier('depth')"
-            />
-            <button
-                v-if="localData.depth.scaledValue == null"
-                :style="addButtonStyle"
-                :class="valueFontSize"
-                class="col-3 m-0 px-xl-3 px-md-0 btn mx-4"
-                @click="add('depth')"
-            >
-            {{'Add Depth'}}
-            </button>
+        <div class="md-fields-row">
+            <template v-for="field in ['width', 'height', 'depth']" :key="field">
+                <div class="md-field">
+                    <InputGroup v-if="localData[field].scaledValue != null" class="md-group">
+                        <InputGroupAddon
+                            :data-cy="dataTestLabel + '-' + field + '-remove-button'"
+                            class="md-remove-addon"
+                            @click="removeField(field)">
+                            <span class="md-remove-label">{{ field.charAt(0).toUpperCase() + field.slice(1) }}</span>
+                            <i class="pi pi-times md-remove-icon"></i>
+                        </InputGroupAddon>
+                        <InputNumber
+                            :data-cy="dataTestLabel + '-' + field + '-number-input'"
+                            class="md-input"
+                            :model-value="localData[field].scaledValue"
+                            @update:model-value="changeScaledValue($event, field)"
+                            :max-fraction-digits="6"
+                            :allow-empty="false"
+                            :disabled="disabled"
+                        />
+                        <InputGroupAddon v-if="unit != null" class="md-unit-addon">
+                            <DimensionUnit
+                                :data-cy="dataTestLabel + '-' + field + '-DimensionUnit-input'"
+                                :min="min"
+                                :max="max"
+                                :unit="unit"
+                                v-model="localData[field].multiplier"
+                                :extraStyleClass="unitExtraStyleClass"
+                                :valueBgColor="valueBgColor"
+                                :valueFontSize="valueFontSize"
+                                :textColor="textColor"
+                                class="md-unit"
+                                @update:modelValue="changeMultiplier(field)"
+                            />
+                        </InputGroupAddon>
+                    </InputGroup>
+                    <Button
+                        v-else
+                        :data-cy="dataTestLabel + '-' + field + '-add-button'"
+                        class="md-add-btn"
+                        severity="secondary"
+                        outlined
+                        @click="add(field)">
+                        <i class="pi pi-plus"></i>
+                        <span>Add {{ field.charAt(0).toUpperCase() + field.slice(1) }}</span>
+                    </Button>
+                </div>
+            </template>
         </div>
-        <div class="row">
-            <label class="text-danger text-center col-12 pt-1" style="font-size: 0.9em; white-space: pre-wrap;">{{errorMessages}}</label>
+        <div class="grid m-0">
+            <label class="md-error text-center col-12 pt-1" style="font-size: 0.9em; white-space: pre-wrap;">{{errorMessages}}</label>
         </div>
     </div>
 </template>
+
+<style scoped>
+.md-rounded {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    background: transparent !important;
+}
+.md-error {
+    color: var(--p-red-400);
+    font-size: 0.78rem !important;
+}
+.md-fields-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    width: 100%;
+}
+.md-field {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.md-group {
+    width: 100%;
+    height: 2.25rem;
+    align-items: stretch;
+}
+.md-group :deep(.p-inputgroupaddon) {
+    height: 2.25rem;
+    line-height: 1.25rem;
+}
+.md-group :deep(.p-inputnumber) {
+    height: 2.25rem;
+}
+.md-remove-addon {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+    padding: 0 0.5rem !important;
+    min-width: auto;
+    gap: 0.25rem;
+    display: flex !important;
+    align-items: center !important;
+    height: 2.25rem;
+}
+.md-remove-addon:hover {
+    background: rgba(var(--p-danger-rgb), 0.15) !important;
+    color: var(--p-danger);
+}
+.md-remove-label {
+    font-size: 0.75rem;
+}
+.md-remove-icon {
+    font-size: 0.65rem;
+    color: var(--p-danger);
+}
+.md-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+}
+.md-input :deep(.p-inputnumber-input) {
+    text-align: end;
+    height: 2.25rem;
+    padding: 0.25rem 1.75rem 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    width: 100%;
+    border-radius: 0;
+}
+.md-input :deep(.p-inputnumber-button) {
+    height: 1.125rem;
+    width: 1.25rem;
+    padding: 0;
+    font-size: 0.5rem;
+    border-radius: 0;
+}
+.md-unit-addon {
+    padding: 0 !important;
+    border-left: 0 !important;
+    display: flex !important;
+    align-items: stretch !important;
+    height: 2.25rem !important;
+}
+.md-unit {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+}
+.md-add-btn {
+    width: 100%;
+    font-size: 0.75rem;
+}
+</style>
 
 

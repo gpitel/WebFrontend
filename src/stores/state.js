@@ -2,8 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, watch, computed  } from 'vue'
 import { useMasStore } from './mas'
 import { useAdviseCacheStore } from './adviseCache'
-import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
+import { deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import * as Defaults from 'WebSharedComponents/assets/js/defaults.js'
+import { CoilAlignment, WindingOrientation } from 'WebSharedComponents/assets/ts/MAS.ts'
 
 
 export const useStateStore = defineStore("state", () => {
@@ -37,6 +38,7 @@ export const useStateStore = defineStore("state", () => {
         Flyback: 'flyback',
         Buck: 'buck',
         Boost: 'boost',
+        Sepic: 'sepic',
         IsolatedBuck: 'isolatedBuck',
         IsolatedBuckBoost: 'isolatedBuckBoost',
         PushPull: 'pushPull',
@@ -48,6 +50,16 @@ export const useStateStore = defineStore("state", () => {
         LlcResonant: 'llcResonant',
         CllcResonant: 'cllcResonant',
         PhaseShiftFullBridge: 'phaseShiftFullBridge',
+        PhaseShiftHalfBridge: 'phaseShiftHalfBridge',
+        AsymmetricHalfBridge: 'asymmetricHalfBridge',
+        Cuk: 'cuk',
+        Zeta: 'zeta',
+        FourSwitchBuckBoost: 'fourSwitchBuckBoost',
+        Weinberg: 'weinberg',
+        Clllc: 'clllc',
+        SeriesResonant: 'seriesResonant',
+        Vienna: 'vienna',
+        CurrentTransformer: 'currentTransformer',
     };
 
 
@@ -219,12 +231,12 @@ export const useStateStore = defineStore("state", () => {
         xAxisMode: 'log',
         yAxisMode: 'log',
         minimumFrequency: 1e3,
-        maximumFrequency: 4e6,
+        maximumFrequency: 1e8,
         minimumTemperature: -40,
         maximumTemperature: 150,
         minimumDcBias: 0,
         maximumDcBias: 25,
-        numberPoints: 25,
+        numberPoints: 100,
     });
 
     const magneticBuilder = ref({
@@ -313,10 +325,6 @@ export const useStateStore = defineStore("state", () => {
         return this.selectedWizard;
     }
 
-    function hasCurrentApplicationMirroredWindings() {
-        return this.selectedApplication == SupportedApplications.CommonModeChoke || this.selectedApplication == SupportedApplications.CommonModeChokeCatalog;
-    }
-
     function selectTool(tool) {
         this.selectedTool = tool;
     }
@@ -352,7 +360,7 @@ export const useStateStore = defineStore("state", () => {
             xAxisMode: 'log',
             yAxisMode: 'log',
             minimumFrequency: 1e3,
-            maximumFrequency: 4e6,
+            maximumFrequency: 1e8,
             minimumTemperature: -40,
             maximumTemperature: 150,
             minimumDcBias: 0,
@@ -412,8 +420,8 @@ export const useStateStore = defineStore("state", () => {
 
     //CoilConfigurations
     const woundCoilConfiguration = ref({
-        sectionsOrientation: "contiguous",
-        sectionsAlignment: "spread",
+        sectionsOrientation: WindingOrientation.Contiguous,
+        sectionsAlignment: CoilAlignment.Spread,
         interlayerThickness: 0,
         intersectionThickness: 0,
         dataPerSection: [],
@@ -421,6 +429,14 @@ export const useStateStore = defineStore("state", () => {
         repetitions: 1,
         proportionPerWinding: [],
     });
+
+    // Winding counts (e.g. 2, 3) that are actually represented in the WASM
+    // catalog cache. Populated by main.js after the cache load completes.
+    // CatalogAdviser uses this to skip the C++ adviser call when no catalog
+    // entry matches the user's requested winding count, preventing the C++
+    // backend from throwing "Exception: vector" (or NaN scoring) on empty
+    // candidate sets.
+    const catalogAvailableWindingCounts = ref([]);
 
     const planarCoilConfiguration = ref({
         stackUp: [],
@@ -485,7 +501,6 @@ export const useStateStore = defineStore("state", () => {
         selectApplication,
         selectedApplication,
         getCurrentApplication,
-        hasCurrentApplicationMirroredWindings,
         SupportedApplications,
         updatedSignals,
         resetMagneticTool,
@@ -524,6 +539,7 @@ export const useStateStore = defineStore("state", () => {
         storePlanarConfiguration,
         loadPlanarConfiguration,
         wiringTechnologyChanged,
+        catalogAvailableWindingCounts,
     }
 },
 {

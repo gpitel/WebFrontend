@@ -1,15 +1,19 @@
 <script setup>
+import { IsolationSide, Topologies } from 'WebSharedComponents/assets/ts/MAS.ts'
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
-import { combinedStyle, combinedClass, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromListRadio from '/WebSharedComponents/DataInput/ElementFromListRadio.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import PairOfDimensions from '/WebSharedComponents/DataInput/PairOfDimensions.vue'
-import TripleOfDimensions from '/WebSharedComponents/DataInput/TripleOfDimensions.vue'
-import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import { defaultFlybackWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from '/WebSharedComponents/assets/js/defaults.js'
+import { combinedStyle, combinedClass, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import DimensionReadOnly from 'WebSharedComponents/DataInput/DimensionReadOnly.vue'
+import ElementFromListRadio from 'WebSharedComponents/DataInput/ElementFromListRadio.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import PairOfDimensions from 'WebSharedComponents/DataInput/PairOfDimensions.vue'
+import TripleOfDimensions from 'WebSharedComponents/DataInput/TripleOfDimensions.vue'
+import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
+import { defaultFlybackWizardInputs, defaultDesignRequirements, minimumMaximumScalePerParameter, filterMas } from 'WebSharedComponents/assets/js/defaults.js'
 import ConverterWizardBase from './ConverterWizardBase.vue'
+import CompactVoltageInput from './CompactVoltageInput.vue'
+import { tooltipsConverterWizards, dropdownLabelsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
 
 <script>
@@ -21,24 +25,25 @@ export default {
             default: 'FlybackWizard'},
         labelWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-9'
+            default: 'col-12 md:col-9'
         },
         valueWidthProportionClass:{
             type: String,
-            default: 'col-xs-12 col-md-3'
+            default: 'col-12 md:col-3'
         }},
     data() {
         const masStore = useMasStore();
         const taskQueueStore = useTaskQueueStore();
         const designLevelOptions = ['Help me with the design', 'I know the design I want'];
         const mosfetOptions = ['Its maximum duty cycle', 'Its maximum drain-source voltage'];
-        const insulationTypes = ['No', 'Basic', 'Reinforced'];
+        const insulationTypes = ['no', 'basic', 'reinforced'];
         const errorMessage = "";
         const localData = deepCopy(defaultFlybackWizardInputs);
         localData["mosfetInputType"] = mosfetOptions[0];
         return {
+            flybackDiagnostics: null,
             masStore,
-            taskQueueStore,
+            taskQueueStore, dropdownLabelsConverterWizards,
             designLevelOptions,
             mosfetOptions,
             insulationTypes,
@@ -56,7 +61,7 @@ export default {
             waveformViewMode: 'magnetic', // 'magnetic' or 'converter'
             forceWaveformUpdate: 0,
             numberOfPeriods: 2,
-            numberOfSteadyStatePeriods: 10}
+            numberOfSteadyStatePeriods: 50}
     },
     computed: {
     },
@@ -67,12 +72,21 @@ export default {
                 this.forceWaveformUpdate += 1;
             });
         }},
+    mounted() {
+        this.$nextTick(() => {
+            if (this._autoRunDone) return;
+            this._autoRunDone = true;
+            try { this.updateErrorMessage?.(); } catch (e) { return; }
+            if (!this.errorMessage) this.simulateIdealWaveforms?.();
+        });
+    },
     methods: {
 
     // ===== WIZARD CONTRACT (used by ConverterWizardBase.executeWaveformAction) =====
     buildParams(mode) {
       const aux = {};
       aux['inputVoltage'] = this.localData.inputVoltage;
+      aux['switchingFrequency'] = this.localData.switchingFrequency;
       aux['diodeVoltageDrop'] = this.localData.diodeVoltageDrop;
       aux['efficiency'] = this.localData.efficiency;
       if (this.localData.designLevel == 'I know the design I want') {
@@ -103,15 +117,16 @@ export default {
     getSimulateFn() { return (aux) => this.taskQueueStore.simulateFlybackIdealWaveforms(aux); },
     getDefaultFrequency() { return this.localData.switchingFrequency; },
     postProcessResults(result, mode) {
+            this.flybackDiagnostics = result?.flybackDiagnostics ?? null;
       if (this.designRequirements) {
         this.simulatedMagnetizingInductance = this.designRequirements.magnetizingInductance?.nominal || null;
         this.simulatedTurnsRatios = this.designRequirements.turnsRatios?.map(tr => tr.nominal) || null;
       }
     },
-    getTopology() { return 'Flyback Converter'; },
+    getTopology() { return Topologies.FlybackConverter; },
     getIsolationSides() {
-      const sides = ['primary'];
-      for (let i = 0; i < this.localData.outputsParameters.length; i++) sides.push('secondary');
+      const sides = [IsolationSide.Primary];
+      for (let i = 0; i < this.localData.outputsParameters.length; i++) sides.push(IsolationSide.Secondary);
       return sides;
     },
     getInsulationType() { return this.localData.insulationType; },
@@ -206,7 +221,7 @@ export default {
   <ConverterWizardBase
     ref="base"
     title="Flyback Wizard"
-    titleIcon="fa-bolt"
+    titleIcon="pi pi-bolt"
       subtitle="Isolated DC-DC Converter with Energy Storage"
     :col1Width="3" :col2Width="4" :col3Width="5"
     :magneticWaveforms="magneticWaveforms"
@@ -231,7 +246,7 @@ export default {
     <template #design-mode>
       <!-- Design Mode -->
       <ElementFromListRadio
-        :name="'designLevel'" :dataTestLabel="dataTestLabel + '-DesignLevel'"
+        :name="'designLevel'" :tooltip="tooltipsConverterWizards['designLevel']" :dataTestLabel="dataTestLabel + '-DesignLevel'"
         :replaceTitle="''" :options="designLevelOptions" :titleSameRow="false"
         v-model="localData"
         :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-12'"
@@ -244,12 +259,12 @@ export default {
     </template>
 
     <template #design-or-switch-parameters-title>
-        <div class="compact-header"><i class="fa-solid fa-cogs me-1"></i>{{localData.designLevel == 'I know the design I want'? "Design Parameters" : "Switch Parameters"}}</div>
+        <div class="compact-header"><i class="pi pi-cog-wide-connected mr-1"></i>{{localData.designLevel == 'I know the design I want'? "Design Parameters" : "Switch Parameters"}}</div>
     </template>
 
     <template #design-or-switch-parameters>
         <div v-if="localData.designLevel == 'I know the design I want'">
-          <Dimension :name="'inductance'" :replaceTitle="'Inductance'" unit="H"
+          <Dimension :name="'inductance'" :tooltip="tooltipsConverterWizards['inductance']" :replaceTitle="'Inductance'" unit="H"
             :dataTestLabel="dataTestLabel + '-Inductance'"
             :min="minimumMaximumScalePerParameter['inductance']['min']"
             :max="minimumMaximumScalePerParameter['inductance']['max']"
@@ -261,7 +276,7 @@ export default {
             :textColor="$styleStore.wizard.inputTextColor"
             @update="updateErrorMessage"
           />
-          <DimensionWithTolerance :name="'dutyCycle'" :replaceTitle="'Duty Cycle'" :unit="null"
+          <DimensionWithTolerance :name="'dutyCycle'" :tooltip="tooltipsConverterWizards['dutyCycle']" :replaceTitle="'Duty Cycle'" :unit="null"
             :dataTestLabel="dataTestLabel + '-DutyCycle'"
             :min="0.01" :max="0.99"
             :allowUnsorted="true"
@@ -276,7 +291,7 @@ export default {
             :textColor="$styleStore.wizard.inputTextColor"
             @update="updateErrorMessage"
           />
-          <Dimension :name="'deadTime'" :replaceTitle="'Dead Time'" unit="s"
+          <Dimension :name="'deadTime'" :tooltip="tooltipsConverterWizards['deadTime']" :replaceTitle="'Dead Time'" unit="s"
             :dataTestLabel="dataTestLabel + '-DeadTime'"
             :min="0" :max="1e-3"
             v-model="localData"
@@ -290,7 +305,7 @@ export default {
       </div>
         <div v-else>
           <ElementFromListRadio
-            :name="'mosfetInputType'" :dataTestLabel="dataTestLabel + '-MosfetInputType'"
+            :name="'mosfetInputType'" :tooltip="tooltipsConverterWizards['mosfetInputType']" :dataTestLabel="dataTestLabel + '-MosfetInputType'"
             :replaceTitle="''" :options="mosfetOptions" :titleSameRow="false"
             v-model="localData"
             :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-12'"
@@ -301,7 +316,7 @@ export default {
             @update="updateErrorMessage"
           />
           <Dimension v-if="localData.mosfetInputType == 'Its maximum duty cycle'"
-          :name="'maximumDutyCycle'" :replaceTitle="'Max Duty Cycle'" :unit="null"
+          :name="'maximumDutyCycle'" :tooltip="tooltipsConverterWizards['maximumDutyCycle']" :replaceTitle="'Max Duty Cycle'" :unit="null"
           :dataTestLabel="dataTestLabel + '-MaximumDutyCycle'"
           :min="0.01" :max="0.99"
           v-model="localData"
@@ -313,7 +328,7 @@ export default {
           @update="updateErrorMessage"
         />
         <Dimension v-else-if="localData.mosfetInputType == 'Its maximum drain-source voltage'"
-          :name="'maximumDrainSourceVoltage'" :replaceTitle="'Max Vds'" unit="V"
+          :name="'maximumDrainSourceVoltage'" :tooltip="tooltipsConverterWizards['maximumDrainSourceVoltage']" :replaceTitle="'Max Vds'" unit="V"
             :dataTestLabel="dataTestLabel + '-MaximumSwitchCurrent'"
             :min="minimumMaximumScalePerParameter['current']['min']"
             :max="minimumMaximumScalePerParameter['current']['max']"
@@ -329,7 +344,7 @@ export default {
     </template>
 
     <template #conditions>
-      <Dimension :name="'switchingFrequency'" :replaceTitle="'Sw. Freq'" unit="Hz"
+      <Dimension :name="'switchingFrequency'" :tooltip="tooltipsConverterWizards['switchingFrequency']" :replaceTitle="'Sw. Freq'" unit="Hz"
         :dataTestLabel="dataTestLabel + '-SwitchingFrequency'"
         :min="minimumMaximumScalePerParameter['frequency']['min']"
         :max="minimumMaximumScalePerParameter['frequency']['max']"
@@ -341,7 +356,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'ambientTemperature'" :replaceTitle="'Temp'" unit=" C"
+      <Dimension :name="'ambientTemperature'" :tooltip="tooltipsConverterWizards['ambientTemperature']" :replaceTitle="'Temp'" unit=" C"
         :dataTestLabel="dataTestLabel + '-AmbientTemperature'"
         :min="minimumMaximumScalePerParameter['temperature']['min']"
         :max="minimumMaximumScalePerParameter['temperature']['max']"
@@ -354,7 +369,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'diodeVoltageDrop'" :replaceTitle="'Diode Vd'" unit="V"
+      <Dimension :name="'diodeVoltageDrop'" :tooltip="tooltipsConverterWizards['diodeVoltageDrop']" :replaceTitle="'Diode Vd'" unit="V"
         :dataTestLabel="dataTestLabel + '-DiodeVoltageDrop'"
         :min="0" :max="10"
         v-model="localData"
@@ -365,7 +380,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <Dimension :name="'efficiency'" :replaceTitle="'Eff'" unit="%" :visualScale="100"
+      <Dimension :name="'efficiency'" :tooltip="tooltipsConverterWizards['efficiency']" :replaceTitle="'Efficiency'" unit="%" :visualScale="100"
         :dataTestLabel="dataTestLabel + '-Efficiency'"
         :min="0.5" :max="1"
         v-model="localData"
@@ -376,7 +391,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <ElementFromList :name="'insulationType'" :replaceTitle="'Insul'" :options="insulationTypes"
+      <ElementFromList :name="'insulationType'" :tooltip="tooltipsConverterWizards['insulationType']" :replaceTitle="'Insulation'" :options="insulationTypes" :optionLabels="dropdownLabelsConverterWizards.insulationType"
         :titleSameRow="true" v-model="localData"
         :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
         :valueFontSize="$styleStore.wizard.inputFontSize"
@@ -389,36 +404,28 @@ export default {
 
     <template #col1-footer>
       <div class="d-flex align-items-center justify-content-between mt-2">
-        <span v-if="errorMessage" class="error-text"><i class="fa-solid fa-exclamation-triangle me-1"></i>{{ errorMessage }}</span>
+        <span v-if="errorMessage" class="error-text"><i class="pi pi-exclamation-triangle mr-1"></i>{{ errorMessage }}</span>
         <span v-else></span>
         <div class="action-btns">
-          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="fa-solid fa-magnifying-glass me-1"></i>Review Specs</button>
-          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Design Magnetic</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm secondary" @click="processAndReview"><i class="pi pi-search mr-1"></i>Review Specs</button>
+          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise"><i class="pi pi-sparkles mr-1"></i>Design Magnetic</button>
         </div>
       </div>
     </template>
-
     <template #input-voltage>
-      <DimensionWithTolerance :name="'inputVoltage'" :replaceTitle="''" unit="V"
+      <CompactVoltageInput
+        :name="'inputVoltage'"
+        :tooltip="tooltipsConverterWizards['inputVoltage']"
         :dataTestLabel="dataTestLabel + '-InputVoltage'"
-        :min="minimumMaximumScalePerParameter['voltage']['min']"
-        :max="minimumMaximumScalePerParameter['voltage']['max']"
-        :labelWidthProportionClass="'d-none'" :valueWidthProportionClass="'col-4'"
-        v-model="localData.inputVoltage" :severalRows="true"
-        :addButtonStyle="$styleStore.wizard.addButton"
-        :removeButtonBgColor="$styleStore.wizard.removeButton['background-color']"
-        :titleFontSize="$styleStore.wizard.inputLabelFontSize"
-        :valueFontSize="$styleStore.wizard.inputFontSize"
-        :labelFontSize="$styleStore.wizard.inputLabelFontSize"
-        :labelBgColor="'transparent'" :valueBgColor="$styleStore.wizard.inputValueBgColor"
-        :textColor="$styleStore.wizard.inputTextColor"
+        unit="V"
+        :modelValue="localData.inputVoltage"
         @update="updateErrorMessage"
       />
     </template>
 
     <template #outputs>
       <div class="mb-3">
-        <ElementFromList :name="'numberOutputs'" :replaceTitle="'Number of Outputs'"
+        <ElementFromList :name="'numberOutputs'" :tooltip="tooltipsConverterWizards['numberOutputs']" :replaceTitle="'Number of Outputs'"
           :dataTestLabel="dataTestLabel + '-NumberOutputs'"
           :options="Array.from({length: 10}, (_, i) => i + 1)"
           :titleSameRow="true" v-model="localData"
@@ -468,5 +475,40 @@ export default {
       </div>
     </template>
 
+    <template v-if="flybackDiagnostics" #diagnostics>
+      <!-- Multi-OP table when perOp[] is present (multiple V_in iterations); -->
+      <!-- otherwise the old single-column DimensionReadOnly layout. -->
+      <table
+        v-if="Array.isArray(flybackDiagnostics.perOp) && flybackDiagnostics.perOp.length > 1"
+        class="diagnostics-perop-table"
+        :data-cy="dataTestLabel + '-Flyback-perOp-table'"
+        :style="{ color: $styleStore.wizard.inputTextColor, fontSize: $styleStore.wizard.inputFontSize, width: '100%', borderCollapse: 'collapse' }"
+      >
+        <thead>
+          <tr>
+            <th :style="{ textAlign: 'left', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }"></th>
+            <th v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px', fontSize: $styleStore.wizard.inputLabelFontSize, opacity: 0.85 }">
+              {{ op.operatingPointName || ('OP ' + i) }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Duty</td>      <td v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.dutyCycle).toFixed(3) }}</td></tr>
+          <tr><td>Mode</td>      <td v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ op.isCcm ? 'CCM' : 'DCM' }}</td></tr>
+          <tr><td>I_pri avg (A)</td>    <td v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.primaryAverageCurrent).toFixed(3) }}</td></tr>
+          <tr><td>I_pri pk (A)</td>     <td v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.primaryPeakCurrent).toFixed(3) }}</td></tr>
+          <tr><td>I_pri ripple (A)</td> <td v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.primaryPeakToPeak).toFixed(3) }}</td></tr>
+          <tr><td>I_sec pk (A)</td>     <td v-for="(op, i) in flybackDiagnostics.perOp" :key="i" :style="{ textAlign: 'right', padding: '2px 4px' }">{{ Number(op.secondaryPeakCurrent).toFixed(3) }}</td></tr>
+        </tbody>
+      </table>
+      <template v-else>
+        <DimensionReadOnly name="flybackDuty"          :tooltip="tooltipsConverterWizards['flybackDuty']"          :replaceTitle="'Duty'"            :value="flybackDiagnostics.dutyCycle"             :unit="null" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FlybackDuty'" />
+        <DimensionReadOnly name="flybackMode"          :tooltip="tooltipsConverterWizards['flybackMode']"          :replaceTitle="'Mode'"            :value="flybackDiagnostics.isCcm ? 'CCM' : 'DCM'" :unit="null" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FlybackMode'" />
+        <DimensionReadOnly name="flybackIprimAvg"      :tooltip="tooltipsConverterWizards['flybackIprimAvg']"      :replaceTitle="'I_pri avg'"       :value="flybackDiagnostics.primaryAverageCurrent" unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FlybackIprimAvg'" />
+        <DimensionReadOnly name="flybackIprimPk"       :tooltip="tooltipsConverterWizards['flybackIprimPk']"       :replaceTitle="'I_pri peak'"      :value="flybackDiagnostics.primaryPeakCurrent"    unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FlybackIprimPk'" />
+        <DimensionReadOnly name="flybackIprimRipple"   :tooltip="tooltipsConverterWizards['flybackIprimRipple']"   :replaceTitle="'I_pri ripple'"    :value="flybackDiagnostics.primaryPeakToPeak"     unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FlybackIprimRipple'" />
+        <DimensionReadOnly name="flybackIsecPk"        :tooltip="tooltipsConverterWizards['flybackIsecPk']"        :replaceTitle="'I_sec peak'"      :value="flybackDiagnostics.secondaryPeakCurrent"  unit="A" :numberDecimals="3" :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'" :valueFontSize="$styleStore.wizard.inputFontSize" :labelFontSize="$styleStore.wizard.inputLabelFontSize" :labelBgColor="'bg-transparent'" :valueBgColor="'bg-transparent'" :textColor="$styleStore.wizard.inputTextColor" :dataTestLabel="dataTestLabel + '-FlybackIsecPk'" />
+      </template>
+    </template>
   </ConverterWizardBase>
 </template>

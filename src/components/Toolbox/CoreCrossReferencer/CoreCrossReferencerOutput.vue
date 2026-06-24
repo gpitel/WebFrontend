@@ -1,7 +1,7 @@
 <script setup>
 import Module from '../../../assets/js/libCrossReferencers.wasm.js'
-import { toTitleCase, removeTrailingZeroes, processCoreTexts, deepCopy, downloadBase64asPDF, clean, download } from '/WebSharedComponents/assets/js/utils.js'
-import Core3DVisualizer from '/WebSharedComponents/Common/Core3DVisualizer.vue'
+import { toTitleCase, removeTrailingZeroes, processCoreTexts, deepCopy, downloadBase64asPDF, clean, download } from 'WebSharedComponents/assets/js/utils.js'
+import Core3DVisualizer from 'WebSharedComponents/Common/Core3DVisualizer.vue'
 import CoreSTPExporter from '../../Exporters/CoreSTPExporter.vue'
 import CoreStlExporter from '../../Exporters/CoreStlExporter.vue'
 import CoreTechnicalDrawingExporter from '../../Exporters/CoreTechnicalDrawingExporter.vue'
@@ -40,20 +40,21 @@ export default {
     data() {
         const style = getComputedStyle(document.body);
         const theme = {
-          primary: style.getPropertyValue('--bs-primary'),
-          secondary: style.getPropertyValue('--bs-secondary'),
-          success: style.getPropertyValue('--bs-success'),
-          info: style.getPropertyValue('--bs-info'),
-          warning: style.getPropertyValue('--bs-warning'),
-          danger: style.getPropertyValue('--bs-danger'),
-          light: style.getPropertyValue('--bs-light'),
-          dark: style.getPropertyValue('--bs-dark'),
-          white: style.getPropertyValue('--bs-white'),
+          primary: style.getPropertyValue('--p-primary'),
+          secondary: style.getPropertyValue('--p-secondary'),
+          success: style.getPropertyValue('--p-success'),
+          info: style.getPropertyValue('--p-info'),
+          warning: style.getPropertyValue('--p-warning'),
+          danger: style.getPropertyValue('--p-danger'),
+          light: style.getPropertyValue('--p-light'),
+          dark: style.getPropertyValue('--p-dark'),
+          white: style.getPropertyValue('--p-white'),
         };
         const localTexts = {};
         return {
             theme,
             localTexts,
+            errorMessage: null,
             masExported: false,
             STPExported: false,
             OBJExported: false,
@@ -158,8 +159,10 @@ export default {
                 mas.magnetic.core.temp["100"].magneticFluxDensitySaturation = temperatureDependantData100["magneticFluxDensitySaturation"];
                 mas.magnetic.core.temp["100"].reluctance = temperatureDependantData100["reluctance"];
                 mas.magnetic.core.temp["100"].resistivity = temperatureDependantData100["resistivity"];
+                this.errorMessage = null;
                 this.localTexts = processCoreTexts(mas);
-            }).catch(error => { 
+            }).catch(error => {
+                this.errorMessage = `Error reading material data: ${error.message ?? error}`;
                 console.error("Error reading material data")
                 console.error(error)
             });
@@ -175,7 +178,10 @@ export default {
 <template>
     <div class="container">
         <div class="row">
-            <h3 class="col-12 p-0 m-0 ps-3">{{mas.magnetic.manufacturerInfo.reference}}</h3>
+            <h3 class="col-12 p-0 m-0 pl-3">{{mas.magnetic.manufacturerInfo.reference}}</h3>
+        </div>
+        <div class="row" v-if="errorMessage != null">
+            <p class="col-12 p-0 m-0 pl-3 text-danger" data-cy="CoreCrossReferencerOutput-error-text">{{errorMessage}}</p>
         </div>
         <div class="row" style="height: 30vh">
             <Core3DVisualizer 
@@ -187,75 +193,75 @@ export default {
             />
         </div>
         <div class="row">
-            <div v-if="mas.magnetic.manufacturerInfo != null" class="col-sm-12 col-md-12 text-start pe-0 row">
+            <div v-if="mas.magnetic.manufacturerInfo != null" class="col-12 md:col-12 text-left pr-0 row">
                 <div class="col-12 mt-2">
                     <div class="row">
-                        <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Core Effective Parameters</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.effectiveParametersTable.effectiveLength.text}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.effectiveParametersTable.effectiveLength.value}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.effectiveParametersTable.effectiveArea.text}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.effectiveParametersTable.effectiveArea.value}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.effectiveParametersTable.effectiveVolume.text}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.effectiveParametersTable.effectiveVolume.value}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.effectiveParametersTable.minimumArea.text}}</div>
-                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.effectiveParametersTable.minimumArea.value}}</div>
+                        <div class="col-12 text-xl p-0 m-0 my-1 text-center">Core Effective Parameters</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.effectiveParametersTable.effectiveLength.text}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.effectiveParametersTable.effectiveLength.value}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.effectiveParametersTable.effectiveArea.text}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.effectiveParametersTable.effectiveArea.value}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.effectiveParametersTable.effectiveVolume.text}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.effectiveParametersTable.effectiveVolume.value}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.effectiveParametersTable.minimumArea.text}}</div>
+                        <div v-if="'effectiveParametersTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.effectiveParametersTable.minimumArea.value}}</div>
                     </div>
                 </div>
                 <div class="col-12 mt-2">
                     <div class="row">
-                        <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Product data</div>
-                        <div v-if="'coreMaterialManufacturerNameTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialManufacturerNameTable.text}}</div>
-                        <div v-if="'coreMaterialManufacturerNameTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialManufacturerNameTable.value}}</div>
-                        <div v-if="'coreMaterialManufacturerReferenceTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialManufacturerReferenceTable.text}}</div>
-                        <div v-if="'coreMaterialManufacturerReferenceTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialManufacturerReferenceTable.value}}</div>
-                        <div v-if="'coreMaterialManufacturerDatasheetTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialManufacturerDatasheetTable.text}}</div>
-                        <a :href="localTexts.coreMaterialManufacturerDatasheetTable.value" target="_blank" rel="noopener noreferrer" v-if="'coreMaterialManufacturerDatasheetTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">Link</a>
-                        <div v-if="'coreMaterialManufacturerMaterialDatasheetTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialManufacturerMaterialDatasheetTable.text}}</div>
-                        <a :href="localTexts.coreMaterialManufacturerMaterialDatasheetTable.value" target="_blank" rel="noopener noreferrer" v-if="'coreMaterialManufacturerMaterialDatasheetTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">Link</a>
-                        <div class="col-12 fs-5 p-0 m-0 my-1 text-center">Material Parameters</div>
-                        <div class="col-6 p-0 m-0 border text-center ps-2"></div>
+                        <div class="col-12 text-xl p-0 m-0 my-1 text-center">Product data</div>
+                        <div v-if="'coreMaterialManufacturerNameTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialManufacturerNameTable.text}}</div>
+                        <div v-if="'coreMaterialManufacturerNameTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialManufacturerNameTable.value}}</div>
+                        <div v-if="'coreMaterialManufacturerReferenceTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialManufacturerReferenceTable.text}}</div>
+                        <div v-if="'coreMaterialManufacturerReferenceTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialManufacturerReferenceTable.value}}</div>
+                        <div v-if="'coreMaterialManufacturerDatasheetTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialManufacturerDatasheetTable.text}}</div>
+                        <a :href="localTexts.coreMaterialManufacturerDatasheetTable.value" target="_blank" rel="noopener noreferrer" v-if="'coreMaterialManufacturerDatasheetTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">Link</a>
+                        <div v-if="'coreMaterialManufacturerMaterialDatasheetTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialManufacturerMaterialDatasheetTable.text}}</div>
+                        <a :href="localTexts.coreMaterialManufacturerMaterialDatasheetTable.value" target="_blank" rel="noopener noreferrer" v-if="'coreMaterialManufacturerMaterialDatasheetTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">Link</a>
+                        <div class="col-12 text-xl p-0 m-0 my-1 text-center">Material Parameters</div>
+                        <div class="col-6 p-0 m-0 border text-center pl-2"></div>
                         <div class="col-3 p-0 m-0 border text-center">25°C</div>
                         <div class="col-3 p-0 m-0 border text-center">100°C</div>
-                        <div v-if="'coreMaterialPermeanceTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialPermeanceTable.text}}</div>
-                        <div v-if="'coreMaterialPermeanceTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialPermeanceTable.value_25}}</div>
-                        <div v-if="'coreMaterialPermeanceTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialPermeanceTable.value_100}}</div>
-                        <div v-if="'coreMaterialInitialPermeabilityTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialInitialPermeabilityTable.text}}</div>
-                        <div v-if="'coreMaterialInitialPermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialInitialPermeabilityTable.value_25}}</div>
-                        <div v-if="'coreMaterialInitialPermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialInitialPermeabilityTable.value_100}}</div>
-                        <div v-if="'coreMaterialEffectivePermeabilityTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialEffectivePermeabilityTable.text}}</div>
-                        <div v-if="'coreMaterialEffectivePermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialEffectivePermeabilityTable.value_25}}</div>
-                        <div v-if="'coreMaterialEffectivePermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialEffectivePermeabilityTable.value_100}}</div>
-                        <div v-if="'coreMaterialResistivityTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialResistivityTable.text}}</div>
-                        <div v-if="'coreMaterialResistivityTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialResistivityTable.value_25}}</div>
-                        <div v-if="'coreMaterialResistivityTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialResistivityTable.value_100}}</div>
-                        <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.magneticFluxDensitySaturationTable.text}}</div>
-                        <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.magneticFluxDensitySaturationTable.value_25}}</div>
-                        <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-end pe-1">{{localTexts.magneticFluxDensitySaturationTable.value_100}}</div>
-                        <div v-if="'coreMaterialCurieTemperatureTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialCurieTemperatureTable.text}}</div>
-                        <div v-if="'coreMaterialCurieTemperatureTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialCurieTemperatureTable.value}}</div>
-                        <div v-if="'coreMaterialDensityTable' in localTexts" class="col-6 p-0 m-0 border ps-2">{{localTexts.coreMaterialDensityTable.text}}</div>
-                        <div v-if="'coreMaterialDensityTable' in localTexts" class="col-6 p-0 m-0 border text-end pe-1">{{localTexts.coreMaterialDensityTable.value}}</div>
+                        <div v-if="'coreMaterialPermeanceTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialPermeanceTable.text}}</div>
+                        <div v-if="'coreMaterialPermeanceTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialPermeanceTable.value_25}}</div>
+                        <div v-if="'coreMaterialPermeanceTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialPermeanceTable.value_100}}</div>
+                        <div v-if="'coreMaterialInitialPermeabilityTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialInitialPermeabilityTable.text}}</div>
+                        <div v-if="'coreMaterialInitialPermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialInitialPermeabilityTable.value_25}}</div>
+                        <div v-if="'coreMaterialInitialPermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialInitialPermeabilityTable.value_100}}</div>
+                        <div v-if="'coreMaterialEffectivePermeabilityTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialEffectivePermeabilityTable.text}}</div>
+                        <div v-if="'coreMaterialEffectivePermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialEffectivePermeabilityTable.value_25}}</div>
+                        <div v-if="'coreMaterialEffectivePermeabilityTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialEffectivePermeabilityTable.value_100}}</div>
+                        <div v-if="'coreMaterialResistivityTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialResistivityTable.text}}</div>
+                        <div v-if="'coreMaterialResistivityTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialResistivityTable.value_25}}</div>
+                        <div v-if="'coreMaterialResistivityTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialResistivityTable.value_100}}</div>
+                        <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.magneticFluxDensitySaturationTable.text}}</div>
+                        <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.magneticFluxDensitySaturationTable.value_25}}</div>
+                        <div v-if="'magneticFluxDensitySaturationTable' in localTexts" class="col-3 p-0 m-0 border text-right pr-1">{{localTexts.magneticFluxDensitySaturationTable.value_100}}</div>
+                        <div v-if="'coreMaterialCurieTemperatureTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialCurieTemperatureTable.text}}</div>
+                        <div v-if="'coreMaterialCurieTemperatureTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialCurieTemperatureTable.value}}</div>
+                        <div v-if="'coreMaterialDensityTable' in localTexts" class="col-6 p-0 m-0 border pl-2">{{localTexts.coreMaterialDensityTable.text}}</div>
+                        <div v-if="'coreMaterialDensityTable' in localTexts" class="col-6 p-0 m-0 border text-right pr-1">{{localTexts.coreMaterialDensityTable.value}}</div>
                     </div>
                 </div>
             </div>
         </div>
-<!--         <div class=" row text-start">
+<!--         <div class=" row text-left">
             <CoreSTPExporter
-                class="btn btn-primary col-4 mt-4"
+                class="p-button p-button-primary col-4 mt-4"
                 :data-cy="dataTestLabel + '-download-STP-File-button'"
                 :core="mas.magnetic.core"
                 :fullCoreModel="true"
                 @export="onExport"
             />
             <CoreStlExporter
-                class="btn btn-primary col-4 mt-4"
+                class="p-button p-button-primary col-4 mt-4"
                 :data-cy="dataTestLabel + '-download-STP-File-button'"
                 :core="mas.magnetic.core"
                 :fullCoreModel="true"
                 @export="onExport"
             />
             <CoreTechnicalDrawingExporter
-                class="btn btn-primary col-4 mt-4"
+                class="p-button p-button-primary col-4 mt-4"
                 :data-cy="dataTestLabel + '-download-STP-File-button'"
                 :core="mas.magnetic.core"
                 :fullCoreModel="true"

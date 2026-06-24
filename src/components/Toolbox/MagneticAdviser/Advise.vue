@@ -5,7 +5,7 @@ import { RadarChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, RadarComponent, GridComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { markRaw } from 'vue'
-import { toTitleCase, removeTrailingZeroes, formatPower, formatPowerDensity, formatInductance, formatTemperature } from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, removeTrailingZeroes, formatPower, formatPowerDensity, formatInductance, formatTemperature } from 'WebSharedComponents/assets/js/utils.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 
 // Register ECharts components once at module level
@@ -51,15 +51,15 @@ export default {
     data() {
         const style = getComputedStyle(document.body);
         const theme = {
-            primary: style.getPropertyValue('--bs-primary'),
-            secondary: style.getPropertyValue('--bs-secondary'),
-            success: style.getPropertyValue('--bs-success'),
-            info: style.getPropertyValue('--bs-info'),
-            warning: style.getPropertyValue('--bs-warning'),
-            danger: style.getPropertyValue('--bs-danger'),
-            light: style.getPropertyValue('--bs-light'),
-            dark: style.getPropertyValue('--bs-dark'),
-            white: style.getPropertyValue('--bs-white'),
+            primary: style.getPropertyValue('--p-primary'),
+            secondary: style.getPropertyValue('--p-secondary'),
+            success: style.getPropertyValue('--p-success'),
+            info: style.getPropertyValue('--p-info'),
+            warning: style.getPropertyValue('--p-warning'),
+            danger: style.getPropertyValue('--p-danger'),
+            light: style.getPropertyValue('--p-light'),
+            dark: style.getPropertyValue('--p-dark'),
+            white: style.getPropertyValue('--p-white'),
         };
         const localTexts = {
             losses: null,
@@ -130,17 +130,15 @@ export default {
             return `${w}×${d}×${h} mm`;
         },
         formattedEfficiency() {
-            try {
-                const losses = (this.masData.outputs[0].coreLosses?.coreLosses || 0)
-                             + (this.masData.outputs[0].windingLosses?.windingLosses || 0);
-                const out = this.masData.outputs[0];
-                const powerIn = out?.powerIn ?? out?.inputPower ?? null;
-                if (powerIn != null && powerIn > 0) {
-                    const eff = (1 - losses / powerIn) * 100;
-                    return `${removeTrailingZeroes(eff, 2)}%`;
-                }
-            } catch (e) {}
-            return null;
+            const out = this.masData?.outputs?.[0];
+            const coreLosses = out?.coreLosses?.coreLosses;
+            const windingLosses = out?.windingLosses?.windingLosses;
+            const powerIn = out?.powerIn ?? out?.inputPower ?? null;
+            if (coreLosses == null || windingLosses == null || powerIn == null || powerIn <= 0) {
+                return null;
+            }
+            const eff = (1 - (coreLosses + windingLosses) / powerIn) * 100;
+            return `${removeTrailingZeroes(eff, 2)}%`;
         },
     },
     mounted() {
@@ -184,9 +182,9 @@ export default {
             });
         },
         createRadarOptions(labels, values) {
-            const primary = (this.theme.primary || '#5a7fff').trim();
-            const success = (this.theme.success || '#00c853').trim();
-            const light = '#e8e8e8';
+            const primary = (this.theme.primary || getComputedStyle(document.documentElement).getPropertyValue('--p-primary')).trim();
+            const success = (this.theme.success || getComputedStyle(document.documentElement).getPropertyValue('--p-success')).trim();
+            const light = getComputedStyle(document.documentElement).getPropertyValue('--p-light').trim();
             return {
                 radar: {
                     indicator: labels.map(label => ({ name: label, max: 1 })),
@@ -204,8 +202,8 @@ export default {
                         show: true,
                         areaStyle: {
                             color: [
-                                'rgba(255, 255, 255, 0.025)',
-                                'rgba(255, 255, 255, 0.05)'
+                                'rgba(var(--p-white-rgb), 0.025)',
+                                'rgba(var(--p-white-rgb), 0.05)'
                             ]
                         }
                     },
@@ -236,9 +234,9 @@ export default {
             };
         },
         createBarOptions(labels, values) {
-            const primary = (this.theme.primary || '#5a7fff').trim();
-            const success = (this.theme.success || '#00c853').trim();
-            const light = '#e8e8e8';
+            const primary = (this.theme.primary || getComputedStyle(document.documentElement).getPropertyValue('--p-primary')).trim();
+            const success = (this.theme.success || getComputedStyle(document.documentElement).getPropertyValue('--p-success')).trim();
+            const light = getComputedStyle(document.documentElement).getPropertyValue('--p-light').trim();
             return {
                 grid: {
                     left: '8%',
@@ -298,6 +296,9 @@ export default {
             try {
                 // hardcoded operation point
                 const rmsPower = await this.taskQueueStore.calculateRmsPower(this.masData.inputs.operatingPoints[0].excitationsPerWinding[0]);
+                if (rmsPower == null) {
+                    throw new Error('RMS power could not be calculated: excitation waveform data is missing');
+                }
                 const volume = this.masData.magnetic.core.processedDescription.width *
                                this.masData.magnetic.core.processedDescription.depth * 
                                this.masData.magnetic.core.processedDescription.height;
@@ -331,9 +332,9 @@ export default {
             <div class="advise-option-titles">
                 <span class="advise-option-title" :title="displayMagneticName">{{ displayMagneticName }}</span>
                 <span class="advise-option-subtitle" :title="coreShapeName + ' · ' + coreMaterialName">
-                    <i class="fa-solid fa-cube me-1"></i>{{ coreShapeName }}
+                    <i class="pi pi-box mr-1"></i>{{ coreShapeName }}
                     <span class="advise-option-subtitle-sep">·</span>
-                    <i class="fa-solid fa-atom me-1"></i>{{ coreMaterialName }}
+                    <i class="pi pi-stars mr-1"></i>{{ coreMaterialName }}
                 </span>
             </div>
             <div class="advise-option-score-wrapper">
@@ -348,45 +349,45 @@ export default {
         <div class="advise-option-body">
             <div class="row g-2">
                 <!-- Stats column -->
-                <div class="col-12 col-lg-6">
+                <div class="col-12 lg:col-6">
                     <div class="advise-stat-grid">
                         <div class="advise-stat">
-                            <i class="fa-solid fa-bolt advise-stat-icon advise-stat-icon-warning"></i>
+                            <i class="pi pi-bolt advise-stat-icon advise-stat-icon-warning"></i>
                             <div class="advise-stat-content">
                                 <small class="advise-stat-label">Losses</small>
                                 <span class="advise-stat-value">{{ formattedLosses || '—' }}</span>
                             </div>
                         </div>
                         <div class="advise-stat">
-                            <i class="fa-solid fa-box advise-stat-icon advise-stat-icon-info"></i>
+                            <i class="pi pi-box advise-stat-icon advise-stat-icon-info"></i>
                             <div class="advise-stat-content">
                                 <small class="advise-stat-label">Power Density</small>
                                 <span class="advise-stat-value">{{ formattedPowerDensity || '—' }}</span>
                             </div>
                         </div>
                         <div v-if="formattedMagnetizingInductance" class="advise-stat">
-                            <i class="fa-solid fa-wave-square advise-stat-icon advise-stat-icon-primary"></i>
+                            <i class="pi pi-volume-up advise-stat-icon advise-stat-icon-primary"></i>
                             <div class="advise-stat-content">
                                 <small class="advise-stat-label">Magnetizing Ind.</small>
                                 <span class="advise-stat-value">{{ formattedMagnetizingInductance }}</span>
                             </div>
                         </div>
                         <div v-if="formattedCoreTemperature" class="advise-stat">
-                            <i class="fa-solid fa-temperature-three-quarters advise-stat-icon advise-stat-icon-danger"></i>
+                            <i class="pi pi-sun advise-stat-icon advise-stat-icon-danger"></i>
                             <div class="advise-stat-content">
                                 <small class="advise-stat-label">Core Temp.</small>
                                 <span class="advise-stat-value">{{ formattedCoreTemperature }}</span>
                             </div>
                         </div>
                         <div v-if="totalTurns > 0" class="advise-stat">
-                            <i class="fa-solid fa-arrows-spin advise-stat-icon advise-stat-icon-success"></i>
+                            <i class="pi pi-refresh advise-stat-icon advise-stat-icon-success"></i>
                             <div class="advise-stat-content">
                                 <small class="advise-stat-label">Turns · Windings</small>
                                 <span class="advise-stat-value">{{ totalTurns }} · {{ numberOfWindings }}</span>
                             </div>
                         </div>
                         <div v-if="formattedDimensions" class="advise-stat">
-                            <i class="fa-solid fa-ruler-combined advise-stat-icon advise-stat-icon-secondary"></i>
+                            <i class="pi pi-arrows-h advise-stat-icon advise-stat-icon-secondary"></i>
                             <div class="advise-stat-content">
                                 <small class="advise-stat-label">Dimensions</small>
                                 <span class="advise-stat-value">{{ formattedDimensions }}</span>
@@ -396,7 +397,7 @@ export default {
                 </div>
 
                 <!-- Chart -->
-                <div class="col-12 col-lg-6">
+                <div class="col-12 lg:col-6">
                     <div class="advise-chart-wrapper">
                         <v-chart
                             v-if="chartOptions"
@@ -417,7 +418,7 @@ export default {
                     class="advise-btn advise-btn-outline flex-fill"
                     @click="$emit('showDetails')"
                 >
-                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <i class="pi pi-search"></i>
                     <span>Details</span>
                 </button>
                 <button
@@ -426,7 +427,7 @@ export default {
                     :class="selected ? 'advise-btn-success' : 'advise-btn-primary'"
                     @click="$emit('selectedMas')"
                 >
-                    <i :class="selected ? 'fa-solid fa-circle-check' : 'fa-regular fa-circle'"></i>
+                    <i :class="selected ? 'pi pi-check-circle' : 'pi pi-circle'"></i>
                     <span>{{ selected ? 'Selected' : 'Select' }}</span>
                 </button>
             </div>
@@ -435,28 +436,28 @@ export default {
 </template>
 
 <style scoped>
-/* Theme shim: in this app --bs-light is actually dark (#2a2a2a) and --bs-white is #d4d4d4,
+/* Theme shim: in this app --p-light is actually dark (#2a2a2a) and --p-white is var(--p-light),
    so semantic "light text" tokens must be built from literal rgb white. */
 .advise-option {
-    --ao-panel-1: color-mix(in srgb, var(--bs-light) 92%, #ffffff 8%);
-    --ao-panel-2: var(--bs-light);
-    --ao-border: rgba(255, 255, 255, 0.1);
-    --ao-border-strong: rgba(255, 255, 255, 0.2);
-    --ao-text: #f2f2f2;
-    --ao-text-muted: rgba(242, 242, 242, 0.7);
-    --ao-text-dim: rgba(242, 242, 242, 0.5);
-    --ao-stat-bg: color-mix(in srgb, var(--bs-light) 80%, var(--bs-dark) 20%);
-    --ao-stat-border: rgba(255, 255, 255, 0.08);
+    --ao-panel-1: color-mix(in srgb, var(--p-light) 92%, var(--p-white) 8%);
+    --ao-panel-2: var(--p-light);
+    --ao-border: rgba(var(--p-white-rgb), 0.1);
+    --ao-border-strong: rgba(var(--p-white-rgb), 0.2);
+    --ao-text: var(--p-white);
+    --ao-text-color-secondary: rgba(var(--p-white-rgb), 0.7);
+    --ao-text-dim: rgba(var(--p-white-rgb), 0.5);
+    --ao-stat-bg: color-mix(in srgb, var(--p-light) 80%, var(--p-dark) 20%);
+    --ao-stat-border: rgba(var(--p-white-rgb), 0.08);
 
     display: flex;
     flex-direction: column;
     background: linear-gradient(180deg, var(--ao-panel-1) 0%, var(--ao-panel-2) 100%);
     border: 1px solid var(--ao-border);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.8);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.8);
     border-radius: 14px;
     box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        0 6px 20px rgba(var(--p-black-rgb), 0.5),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.06);
     overflow: hidden;
     transition: border-color 0.2s, box-shadow 0.25s, transform 0.1s;
 }
@@ -465,18 +466,18 @@ export default {
     transform: translateY(-1px);
     border-color: var(--ao-border-strong);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.55),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        0 8px 24px rgba(var(--p-black-rgb), 0.55),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.08);
 }
 
 .advise-option-selected {
-    border-color: rgba(var(--bs-primary-rgb), 0.65);
+    border-color: rgba(var(--p-primary-rgb), 0.65);
     background: linear-gradient(180deg,
-        color-mix(in srgb, var(--bs-primary) 22%, var(--ao-panel-1)) 0%,
+        color-mix(in srgb, var(--p-primary) 22%, var(--ao-panel-1)) 0%,
         var(--ao-panel-2) 100%);
     box-shadow:
-        0 2px 16px rgba(var(--bs-primary-rgb), 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        0 2px 16px rgba(var(--p-primary-rgb), 0.35),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.08);
 }
 
 .advise-option-header {
@@ -484,7 +485,7 @@ export default {
     align-items: flex-start;
     justify-content: space-between;
     padding: 0.7rem 0.85rem 0.65rem 0.85rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(var(--p-white-rgb), 0.05);
     border-bottom: 1px solid var(--ao-border);
     gap: 0.6rem;
 }
@@ -508,7 +509,7 @@ export default {
 }
 
 .advise-option-subtitle {
-    color: var(--ao-text-muted);
+    color: var(--ao-text-color-secondary);
     font-size: 0.72rem;
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -535,32 +536,32 @@ export default {
     font-size: 1rem;
     font-weight: 800;
     background: linear-gradient(135deg,
-        rgba(var(--bs-primary-rgb), 0.35) 0%,
-        rgba(var(--bs-primary-rgb), 0.18) 100%);
+        rgba(var(--p-primary-rgb), 0.35) 0%,
+        rgba(var(--p-primary-rgb), 0.18) 100%);
     color: var(--ao-text);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.65);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.65);
     box-shadow:
-        0 0 0 1px rgba(var(--bs-primary-rgb), 0.25),
-        0 2px 10px rgba(var(--bs-primary-rgb), 0.3);
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.25),
+        0 2px 10px rgba(var(--p-primary-rgb), 0.3);
     line-height: 1;
 }
 
 .advise-option-score small {
     font-size: 0.6rem;
     font-weight: 600;
-    color: var(--ao-text-muted);
+    color: var(--ao-text-color-secondary);
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
 
 .advise-option-score-selected {
     background: linear-gradient(135deg,
-        rgba(var(--bs-primary-rgb), 0.55) 0%,
-        rgba(var(--bs-primary-rgb), 0.3) 100%);
-    border-color: rgba(var(--bs-primary-rgb), 0.85);
+        rgba(var(--p-primary-rgb), 0.55) 0%,
+        rgba(var(--p-primary-rgb), 0.3) 100%);
+    border-color: rgba(var(--p-primary-rgb), 0.85);
     box-shadow:
-        0 0 0 1px rgba(var(--bs-primary-rgb), 0.5),
-        0 2px 14px rgba(var(--bs-primary-rgb), 0.5);
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.5),
+        0 2px 14px rgba(var(--p-primary-rgb), 0.5);
 }
 
 .advise-option-body {
@@ -585,8 +586,8 @@ export default {
 }
 
 .advise-stat:hover {
-    background: color-mix(in srgb, var(--ao-stat-bg) 85%, #ffffff 15%);
-    border-color: rgba(255, 255, 255, 0.18);
+    background: color-mix(in srgb, var(--ao-stat-bg) 85%, var(--p-white) 15%);
+    border-color: rgba(var(--p-white-rgb), 0.18);
 }
 
 .advise-stat-icon {
@@ -597,12 +598,12 @@ export default {
     opacity: 0.95;
 }
 
-.advise-stat-icon-warning { color: var(--bs-warning); }
-.advise-stat-icon-info { color: var(--bs-info); }
-.advise-stat-icon-primary { color: var(--bs-primary); }
-.advise-stat-icon-danger { color: var(--bs-danger); }
-.advise-stat-icon-success { color: var(--bs-success); }
-.advise-stat-icon-secondary { color: var(--ao-text-muted); }
+.advise-stat-icon-warning { color: var(--p-warning); }
+.advise-stat-icon-info { color: var(--p-info); }
+.advise-stat-icon-primary { color: var(--p-primary); }
+.advise-stat-icon-danger { color: var(--p-danger); }
+.advise-stat-icon-success { color: var(--p-success); }
+.advise-stat-icon-secondary { color: var(--ao-text-color-secondary); }
 
 .advise-stat-content {
     display: flex;
@@ -613,7 +614,7 @@ export default {
 }
 
 .advise-stat-label {
-    color: var(--ao-text-muted);
+    color: var(--ao-text-color-secondary);
     font-size: 0.65rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -651,7 +652,7 @@ export default {
 .advise-option-footer {
     padding: 0.6rem 0.8rem;
     border-top: 1px solid var(--ao-border);
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--p-white-rgb), 0.03);
     margin-top: auto;
 }
 
@@ -683,42 +684,42 @@ export default {
 
 .advise-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: #ffffff;
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, #ffffff 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .advise-btn-success {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-success) 115%, transparent 0%) 0%,
-        var(--bs-success) 55%,
-        rgb(var(--bs-success-rgb) / 0.85) 100%);
-    color: #ffffff;
-    border: 1px solid color-mix(in srgb, var(--bs-success) 70%, #ffffff 30%);
+        color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
+        var(--p-success) 55%,
+        rgb(var(--p-success-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-success-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-success-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-success-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-success-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .advise-btn-outline {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.25);
     color: var(--ao-text);
 }
 
 .advise-btn-outline:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.4);
-    color: #ffffff;
+    background: rgba(var(--p-white-rgb), 0.15);
+    border-color: rgba(var(--p-white-rgb), 0.4);
+    color: var(--p-white);
 }
 </style>
 

@@ -1,5 +1,5 @@
 <script>
-import LineVisualizer from '/WebSharedComponents/Common/LineVisualizer.vue'
+import LineVisualizer from 'WebSharedComponents/Common/LineVisualizer.vue'
 import { useConverterWaveforms } from '../../composables/useConverterWaveforms.js'
 
 export default {
@@ -83,11 +83,11 @@ export default {
         },
         
         bgColor() {
-            return this.$styleStore?.theme?.light || 'transparent';
+            return this.$styleStore?.operatingPoints?.graphBgColor?.['background-color'] || 'transparent';
         },
         
         textColor() {
-            return this.$styleStore?.wizard?.inputTextColor?.color || '#ffffff';
+            return this.$styleStore?.wizard?.inputTextColor?.color || 'var(--p-white)';
         },
     },
     
@@ -97,8 +97,8 @@ export default {
         },
         
         getPairedWaveformDataForVisualizer(waveforms, opIndex, pairIndex) {
-            const voltageColor = this.$styleStore?.operatingPoints?.voltageGraph?.color || '#b18aea';
-            const currentColor = this.$styleStore?.operatingPoints?.currentGraph?.color || '#4CAF50';
+            const voltageColor = this.$styleStore?.operatingPoints?.voltageGraph?.color;
+            const currentColor = this.$styleStore?.operatingPoints?.currentGraph?.color;
             return this._composable.getPairedWaveformDataForVisualizer(
                 waveforms, 
                 opIndex, 
@@ -159,14 +159,14 @@ export default {
         },
         
         getButtonStyle(mode) {
-            const primaryColor = this.$styleStore?.theme?.primary || '#b18aea';
+            const primaryColor = this.$styleStore?.theme?.primary;
             const isActive = this.viewMode === mode;
             
             if (isActive) {
                 return {
                     backgroundColor: primaryColor,
                     borderColor: primaryColor,
-                    color: '#ffffff'
+                    color: 'var(--p-white)'
                 };
             } else {
                 return {
@@ -191,14 +191,14 @@ export default {
                     @click="setViewMode('magnetic')"
                     :style="getButtonStyle('magnetic')"
                 >
-                    <i class="fa-solid fa-magnet me-1"></i>Magnetic
+                    <i class="pi pi-cog mr-1"></i>Magnetic
                 </button>
                 <button 
                     :class="['btn', viewMode === 'converter' ? 'btn-primary' : 'btn-outline-primary']"
                     @click="setViewMode('converter')"
                     :style="getButtonStyle('converter')"
                 >
-                    <i class="fa-solid fa-microchip me-1"></i>Converter
+                    <i class="pi pi-microchip mr-1"></i>Converter
                 </button>
             </div>
         </div>
@@ -217,9 +217,9 @@ export default {
                         :title="getTitleForPair(opIndex, pairIndex)"
                         :titleFontSize="14"
                         :axisLabelFontSize="10"
-                        :chartPaddings="{top: 35, left: 45, right: 45, bottom: 25}"
+                        :chartPaddings="{top: 50, left: 45, right: 45, bottom: 25}"
                         :bgColor="bgColor"
-                        :lineColor="$styleStore?.theme?.primary || '#b18aea'"
+                        :lineColor="$styleStore?.theme?.primary"
                         :textColor="textColor"
                         :chartStyle="chartStyle"
                         :toolbox="toolbox"
@@ -231,6 +231,7 @@ export default {
                         :forceAxisMax="getAxisLimitsForPair(opIndex, pairIndex).max"
                         :forceAxisIndependentLimits="true"
                         :forceUpdate="forceUpdate"
+                        :showArea="false"
                     />
                 </div>
             </div>
@@ -238,7 +239,7 @@ export default {
         
         <!-- Empty State -->
         <div v-else class="empty-state text-center py-4">
-            <i class="fa-solid fa-wave-square empty-icon mb-2"></i>
+            <i class="pi pi-volume-up empty-icon mb-2"></i>
             <p class="empty-text mb-0">
                 Click <strong>Analytical</strong> or <strong>Simulated</strong> to generate waveforms
             </p>
@@ -252,8 +253,8 @@ export default {
 }
 
 .view-toggle .btn-primary {
-    background-color: v-bind('$styleStore?.theme?.primary || "#b18aea"');
-    border-color: v-bind('$styleStore?.theme?.primary || "#b18aea"');
+    background-color: var(--om-primary);
+    border-color: var(--om-primary);
 }
 
 .view-toggle .btn-outline-primary {
@@ -261,17 +262,17 @@ export default {
 }
 
 .view-toggle .btn-outline-primary:hover {
-    background-color: v-bind('$styleStore?.theme?.primary || "#b18aea"') !important;
-    border-color: v-bind('$styleStore?.theme?.primary || "#b18aea"') !important;
-    color: #ffffff !important;
+    background-color: var(--om-primary) !important;
+    border-color: var(--om-primary) !important;
+    color: var(--p-white) !important;
 }
 
 .operating-point-label {
     font-size: 0.85rem;
     font-weight: 500;
-    color: v-bind('$styleStore?.theme?.primary || "#b18aea"');
+    color: var(--om-primary);
     padding: 4px 8px;
-    background: rgba(177, 138, 234, 0.1);
+    background: rgb(from var(--om-primary) r g b / 0.1);
     border-radius: 4px;
     margin-bottom: 8px;
 }
@@ -285,7 +286,7 @@ export default {
 }
 
 .empty-state {
-    color: #888;
+    color: var(--p-secondary);
 }
 
 .empty-icon {

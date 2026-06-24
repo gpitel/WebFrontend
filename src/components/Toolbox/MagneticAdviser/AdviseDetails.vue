@@ -1,12 +1,15 @@
 <script setup>
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useStyleStore } from '../../../stores/style'
-import { toTitleCase, removeTrailingZeroes, formatInductance, formatPower, formatTemperature, formatResistance } from '/WebSharedComponents/assets/js/utils.js'
-import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
+import { toTitleCase, removeTrailingZeroes, formatInductance, formatPower, formatTemperature, formatResistance } from 'WebSharedComponents/assets/js/utils.js'
+import Magnetic2DVisualizer from 'WebSharedComponents/Common/Magnetic2DVisualizer.vue'
+import Drawer from 'primevue/drawer'
 </script>
 
 <script>
 export default {
+    components: { Drawer },
+    emits: ['update:visible'],
     props: {
         modelValue: {
             type: Object,
@@ -16,6 +19,7 @@ export default {
             type: String,
             default: '',
         },
+        visible: { type: Boolean, default: false },
     },
     data() {
         return {
@@ -179,6 +183,9 @@ export default {
         },
         fillCoreLosses(output, localTexts, opIndex) {
             if (output.coreLosses) {
+                if (output.coreLosses.coreLosses < 0) {
+                    console.error('[MagneticAdviser] Negative core losses received from MKF:', output.coreLosses.coreLosses, 'methodUsed:', output.coreLosses.methodUsed, 'opIndex:', opIndex);
+                }
                 const lossAux = formatPower(output.coreLosses.coreLosses);
                 localTexts.coreLossesTable[opIndex].text = 'Core losses';
                 localTexts.coreLossesTable[opIndex].value = `${removeTrailingZeroes(lossAux.label, 2)} ${lossAux.unit}`;
@@ -227,8 +234,8 @@ export default {
         },
     },
     computed: {
-        offcanvasPosition() {
-            return window.innerWidth < 600 ? 'offcanvas-bottom' : 'offcanvas-end';
+        drawerPosition() {
+            return window.innerWidth < 600 ? 'bottom' : 'right';
         }
     },
     mounted() {
@@ -239,13 +246,14 @@ export default {
 </script>
 
 <template>
-    <div
-        :class="offcanvasPosition"
-        class="offcanvas offcanvas-size-xl ad-offcanvas"
-        tabindex="-1"
-        id="CoreAdviserDetailOffCanvas"
-        aria-labelledby="CoreAdviserDetailOffCanvasLabel"
-    >
+    <Drawer
+        :visible="visible"
+        @update:visible="(v) => $emit('update:visible', v)"
+        :position="drawerPosition"
+        :modal="true"
+        :showCloseIcon="false"
+        :pt="{ root: { class: 'ad-offcanvas' } }"
+        :style="{ width: drawerPosition === 'bottom' ? '100vw' : '68vw', height: drawerPosition === 'bottom' ? '80vh' : '100%' }">
         <div v-if="modelValue.magnetic.manufacturerInfo" class="ad-root">
             <!-- Top header -->
             <div class="ad-topbar">
@@ -257,21 +265,21 @@ export default {
                     data-cy="CoreAdviseDetail-corner-close-modal-button"
                     type="button"
                     class="ad-close"
-                    data-bs-dismiss="offcanvas"
+                    @click="$emit('update:visible', false)"
                     aria-label="Close"
                 >
-                    <i class="fa-solid fa-xmark"></i>
+                    <i class="pi pi-times"></i>
                 </button>
             </div>
 
             <div class="ad-body">
                 <div class="row g-3">
                     <!-- Data Tables Section -->
-                    <div class="col-12 col-lg-7 ad-tables">
+                    <div class="col-12 lg:col-7 ad-tables">
                         <!-- Number of Turns Table -->
                         <div class="ad-card">
                             <div class="ad-card-header">
-                                <i class="fa-solid fa-arrows-spin"></i>
+                                <i class="pi pi-refresh"></i>
                                 <span>Windings</span>
                             </div>
                             <table class="ad-table">
@@ -297,14 +305,14 @@ export default {
                         <!-- Operating Points -->
                         <div v-for="(op, opIdx) in modelValue.outputs" :key="'output-' + opIdx" class="ad-op">
                             <div class="ad-op-title">
-                                <i class="fa-solid fa-bullseye"></i>
+                                <i class="pi pi-bullseye"></i>
                                 <span>{{ modelValue.inputs.operatingPoints[opIdx].name }}</span>
                             </div>
 
                             <!-- Core Data -->
                             <div class="ad-card">
                                 <div class="ad-card-header">
-                                    <i class="fa-solid fa-cube"></i>
+                                    <i class="pi pi-box"></i>
                                     <span>Core</span>
                                 </div>
                                 <table class="ad-table ad-table-kv">
@@ -328,7 +336,7 @@ export default {
                             <!-- Coil Data -->
                             <div class="ad-card">
                                 <div class="ad-card-header">
-                                    <i class="fa-solid fa-wave-square"></i>
+                                    <i class="pi pi-volume-up"></i>
                                     <span>Coil</span>
                                 </div>
                                 <table class="ad-table">
@@ -354,7 +362,7 @@ export default {
                             <!-- Winding Losses Breakdown -->
                             <div class="ad-card">
                                 <div class="ad-card-header">
-                                    <i class="fa-solid fa-bolt"></i>
+                                    <i class="pi pi-bolt"></i>
                                     <span>Winding Losses Breakdown</span>
                                 </div>
                                 <table class="ad-table">
@@ -380,10 +388,10 @@ export default {
                     </div>
 
                     <!-- Visualizer Section -->
-                    <div class="col-12 col-lg-5 ad-viz-col">
+                    <div class="col-12 lg:col-5 ad-viz-col">
                         <div class="ad-card ad-viz-card">
                             <div class="ad-card-header">
-                                <i class="fa-solid fa-eye"></i>
+                                <i class="pi pi-eye"></i>
                                 <span>Core &amp; Coil</span>
                             </div>
                             <div class="ad-viz-body">
@@ -399,29 +407,29 @@ export default {
                 </div>
             </div>
         </div>
-    </div>
+    </Drawer>
 </template>
 
 <style scoped>
-/* Theme shim: --bs-light is #2a2a2a, --bs-white is #d4d4d4; use literal white for text. */
+/* Theme shim: --p-light is #2a2a2a, --p-white is var(--p-light); use literal white for text. */
 .ad-offcanvas {
-    --ad-panel-1: color-mix(in srgb, var(--bs-light) 92%, #ffffff 8%);
-    --ad-panel-2: var(--bs-light);
-    --ad-sub-1: color-mix(in srgb, var(--bs-light) 80%, var(--bs-dark) 20%);
-    --ad-sub-2: color-mix(in srgb, var(--bs-light) 88%, var(--bs-dark) 12%);
-    --ad-border: rgba(255, 255, 255, 0.1);
-    --ad-border-strong: rgba(255, 255, 255, 0.18);
-    --ad-text: #f2f2f2;
-    --ad-text-muted: rgba(242, 242, 242, 0.72);
+    --ad-panel-1: color-mix(in srgb, var(--p-light) 92%, var(--p-white) 8%);
+    --ad-panel-2: var(--p-light);
+    --ad-sub-1: color-mix(in srgb, var(--p-light) 80%, var(--p-dark) 20%);
+    --ad-sub-2: color-mix(in srgb, var(--p-light) 88%, var(--p-dark) 12%);
+    --ad-border: rgba(var(--p-white-rgb), 0.1);
+    --ad-border-strong: rgba(var(--p-white-rgb), 0.18);
+    --ad-text: var(--p-white);
+    --ad-text-color-secondary: rgba(var(--p-white-rgb), 0.72);
 
-    --bs-offcanvas-width: 68vw !important;
-    --bs-offcanvas-height: 80vh !important;
-    --bs-offcanvas-bg: transparent !important;
-    --bs-offcanvas-color: var(--ad-text) !important;
+    --p-offcanvas-width: 68vw !important;
+    --p-offcanvas-height: 80vh !important;
+    --p-offcanvas-bg: transparent !important;
+    --p-offcanvas-color: var(--ad-text) !important;
     border: none !important;
     background: linear-gradient(180deg, var(--ad-panel-1) 0%, var(--ad-panel-2) 100%) !important;
     color: var(--ad-text) !important;
-    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.6) !important;
+    box-shadow: -8px 0 30px rgba(var(--p-black-rgb), 0.6) !important;
 }
 
 .ad-root {
@@ -439,7 +447,7 @@ export default {
     gap: 0.8rem;
     padding: 0.55rem 0.85rem;
     border-bottom: 1px solid var(--ad-border);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--p-white-rgb), 0.04);
     flex-shrink: 0;
 }
 
@@ -460,7 +468,7 @@ export default {
 }
 
 .ad-subtitle {
-    color: var(--ad-text-muted);
+    color: var(--ad-text-color-secondary);
     font-size: 0.85rem;
     font-weight: 500;
     margin-top: 0.15rem;
@@ -475,8 +483,8 @@ export default {
     width: 1.6rem;
     height: 1.6rem;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.2);
     color: var(--ad-text);
     font-size: 0.78rem;
     cursor: pointer;
@@ -484,9 +492,9 @@ export default {
 }
 
 .ad-close:hover {
-    background: rgb(var(--bs-danger-rgb) / 0.3);
-    border-color: rgb(var(--bs-danger-rgb) / 0.6);
-    color: #ffffff;
+    background: rgb(var(--p-danger-rgb) / 0.3);
+    border-color: rgb(var(--p-danger-rgb) / 0.6);
+    color: var(--p-white);
     transform: rotate(90deg);
 }
 
@@ -501,10 +509,10 @@ export default {
 .ad-card {
     background: linear-gradient(180deg, var(--ad-sub-1) 0%, var(--ad-sub-2) 100%);
     border: 1px solid var(--ad-border);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.7);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.7);
     border-radius: 10px;
     overflow: hidden;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 3px 10px rgba(var(--p-black-rgb), 0.35);
     margin-bottom: 0.5rem;
 }
 
@@ -513,9 +521,9 @@ export default {
     align-items: center;
     gap: 0.45rem;
     padding: 0.4rem 0.7rem;
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--p-white-rgb), 0.04);
     border-bottom: 1px solid var(--ad-border);
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.85rem;
     letter-spacing: 0.03em;
@@ -524,7 +532,7 @@ export default {
 
 .ad-card-header i {
     font-size: 0.9rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.5));
 }
 
 /* ============ Tables ============ */
@@ -537,7 +545,7 @@ export default {
 }
 
 .ad-table thead tr {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(var(--p-white-rgb), 0.05);
 }
 
 .ad-table thead th {
@@ -547,14 +555,14 @@ export default {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--ad-text-muted);
+    color: var(--ad-text-color-secondary);
     border-bottom: 1px solid var(--ad-border);
     white-space: nowrap;
 }
 
 .ad-table tbody td {
     padding: 0.35rem 0.7rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.05);
     font-weight: 600;
 }
 
@@ -563,15 +571,15 @@ export default {
 }
 
 .ad-table tbody tr:nth-child(even) td {
-    background: rgba(var(--bs-primary-rgb), 0.08);
+    background: rgba(var(--p-primary-rgb), 0.08);
 }
 
 .ad-table tbody tr:hover td {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(var(--p-white-rgb), 0.05);
 }
 
 .ad-table tbody td:first-child {
-    color: var(--ad-text-muted);
+    color: var(--ad-text-color-secondary);
     font-weight: 500;
 }
 
@@ -604,9 +612,9 @@ export default {
 }
 
 .ad-op-title i {
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-size: 0.9rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.5));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.5));
 }
 
 /* ============ Visualizer ============ */

@@ -1,9 +1,9 @@
 <script setup>
-import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
-import { minimumMaximumScalePerParameter } from '/WebSharedComponents/assets/js/defaults.js'
-import { WaveformLabel } from '/WebSharedComponents/assets/ts/MAS.ts'
-import { toTitleCase, combinedStyle } from '/WebSharedComponents/assets/js/utils.js'
+import Dimension from 'WebSharedComponents/DataInput/Dimension.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import { minimumMaximumScalePerParameter } from 'WebSharedComponents/assets/js/defaults.js'
+import { WaveformLabel } from 'WebSharedComponents/assets/ts/MAS.ts'
+import { toTitleCase, combinedStyle } from 'WebSharedComponents/assets/js/utils.js'
 
 </script>
 
@@ -38,15 +38,20 @@ export default {
         }
     },
     computed: {
+        waveformLabelOptions() {
+            const result = {};
+            Object.values(WaveformLabel).forEach(v => { result[v] = toTitleCase(v); });
+            return result;
+        },
         disableOffset() {
-            return this.modelValue[this.signalDescriptor].processed.label === "Rectangular";
+            return this.modelValue[this.signalDescriptor].processed.label === "rectangular";
         },
         induceableSignal() {
             if (this.signalDescriptor == 'current') {
                 return true;
             }
             else {
-                return this.modelValue.current.processed.label != "Rectangular" && this.modelValue.current.processed.label != "Bipolar Rectangular" && this.modelValue.current.processed.label != "Unipolar Rectangular";
+                return this.modelValue.current.processed.label != "rectangular" && this.modelValue.current.processed.label != "bipolarRectangular" && this.modelValue.current.processed.label != "unipolarRectangular";
             }
         }
     },
@@ -85,14 +90,17 @@ export default {
         </div>
         <div class="row">
 
-            <ElementFromList class="border-bottom border-1 pb-2 mb-1 col-12"
+            <ElementFromList class="pb-2 mb-1 col-12"
                 :name="'label'"
                 :dataTestLabel="dataTestLabel + '-Label'"
                 :options="Object.values(WaveformLabel)"
+                :optionLabels="waveformLabelOptions"
                 :titleSameRow="true"
                 :replaceTitle="'Waveform'"
                 v-model="modelValue[signalDescriptor].processed"
                 @update="labelChanged"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
@@ -100,7 +108,7 @@ export default {
                 :textColor="$styleStore.operatingPoints.inputTextColor"
             />
 
-            <Dimension class="border-bottom border-1 col-12"
+            <Dimension class="col-12"
                 :name="'peakToPeak'"
                 :unit="signalDescriptor == 'current'? 'A' : 'V'"
                 :unitMin="0.001"
@@ -112,6 +120,8 @@ export default {
                 :forceUpdate="forceUpdate"
                 v-model="modelValue[signalDescriptor].processed"
                 @update="peakToPeakChanged"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
@@ -119,7 +129,7 @@ export default {
                 :textColor="$styleStore.operatingPoints.inputTextColor"
             />
 
-            <Dimension class="border-bottom border-1 col-12"
+            <Dimension class="col-12"
                 v-if="!disableOffset"
                 :name="'offset'"
                 :unit="signalDescriptor == 'current'? 'A' : 'V'"
@@ -134,6 +144,8 @@ export default {
                 :forceUpdate="forceUpdate"
                 v-model="modelValue[signalDescriptor].processed"
                 @update="offsetChanged"
+                :labelWidthProportionClass="'col-12 md:col-7'"
+                :valueWidthProportionClass="'col-12 md:col-5'"
                 :valueFontSize="$styleStore.operatingPoints.inputFontSize"
                 :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
                 :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
@@ -141,16 +153,18 @@ export default {
                 :textColor="$styleStore.operatingPoints.inputTextColor"
             />
             <button
-                :style="combinedStyle([$styleStore.operatingPoints.inputTitleFontSize, signalDescriptor == 'current'? $styleStore.operatingPoints.currentBgColor : signalDescriptor == 'voltage'? $styleStore.operatingPoints.voltageBgColor : $styleStore.operatingPoints.commonParameterBgColor])"
+                :style="[
+                    combinedStyle([$styleStore.operatingPoints.inputTitleFontSize, signalDescriptor == 'current'? $styleStore.operatingPoints.currentBgColor : signalDescriptor == 'voltage'? $styleStore.operatingPoints.voltageBgColor : $styleStore.operatingPoints.commonParameterBgColor]),
+                    { color: signalDescriptor == 'current' ? 'var(--p-dark)' : 'var(--p-white)', fontWeight: 600, maxHeight: '1.7em' }
+                ]"
                 v-if="induceableSignal"
                 :data-cy="`${dataTestLabel}-induce-button`"
-                class="btn offset-1 col-10 mt-2 p-0"
+                class="btn col-offset-1 col-10 mt-2 p-0"
                 @click="$emit('induce')"
-                style="max-height: 1.7em"
             >
                 {{'Induce from ' + (signalDescriptor == 'current'? 'voltage' : 'current')}}
-                <i class="fa-solid fa-bolt"></i>
-                <i class="fa-solid fa-magnet"></i>
+                <i class="pi pi-bolt"></i>
+                <i class="pi pi-cog"></i>
             </button>
 
         </div>

@@ -3,10 +3,9 @@ import { useMasStore } from '../../stores/mas'
 import { useAdviseCacheStore } from '../../stores/adviseCache'
 import { useTaskQueueStore } from '../../stores/taskQueue'
 import { nextTick } from 'vue'
-import { Offcanvas } from 'bootstrap'
 import Slider from '@vueform/slider'
-import { removeTrailingZeroes, toTitleCase, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
-import { magneticAdviserWeights } from '/WebSharedComponents/assets/js/defaults.js'
+import { removeTrailingZeroes, toTitleCase, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import { magneticAdviserWeights } from 'WebSharedComponents/assets/js/defaults.js'
 import Advise from './MagneticAdviser/Advise.vue'
 import AdviseDetails from './MagneticAdviser/AdviseDetails.vue'
 </script>
@@ -15,15 +14,15 @@ import AdviseDetails from './MagneticAdviser/AdviseDetails.vue'
 
 const style = getComputedStyle(document.body);
 const theme = {
-  primary: style.getPropertyValue('--bs-primary'),
-  secondary: style.getPropertyValue('--bs-secondary'),
-  success: style.getPropertyValue('--bs-success'),
-  info: style.getPropertyValue('--bs-info'),
-  warning: style.getPropertyValue('--bs-warning'),
-  danger: style.getPropertyValue('--bs-danger'),
-  light: style.getPropertyValue('--bs-light'),
-  dark: style.getPropertyValue('--bs-dark'),
-  white: style.getPropertyValue('--bs-white'),
+  primary: style.getPropertyValue('--p-primary'),
+  secondary: style.getPropertyValue('--p-secondary'),
+  success: style.getPropertyValue('--p-success'),
+  info: style.getPropertyValue('--p-info'),
+  warning: style.getPropertyValue('--p-warning'),
+  danger: style.getPropertyValue('--p-danger'),
+  light: style.getPropertyValue('--p-light'),
+  dark: style.getPropertyValue('--p-dark'),
+  white: style.getPropertyValue('--p-white'),
 };
 
 export default {
@@ -61,6 +60,7 @@ export default {
             dataUptoDate,
             currentAdviseToShow: 0,
             detailMas: null,
+            adviseDetailsVisible: false,
         }
     },
     computed: {
@@ -97,21 +97,15 @@ export default {
 
                         // Ensure coreAdviseMode is a string, not an object
                         let coreAdviseMode = this.$settingsStore.adviserSettings.coreAdviseMode;
-                        console.log('[MagneticAdviser] raw coreAdviseMode:', coreAdviseMode);
-                        console.log('[MagneticAdviser] typeof coreAdviseMode:', typeof coreAdviseMode);
-                        console.log('[MagneticAdviser] coreAdviseMode instanceof Object:', coreAdviseMode instanceof Object);
-                        console.log('[MagneticAdviser] String(coreAdviseMode):', String(coreAdviseMode));
                         
                         // Handle case where it's an object or [object Object]
                         if (typeof coreAdviseMode === 'object' || String(coreAdviseMode) === '[object Object]') {
-                            console.warn('[MagneticAdviser] coreAdviseMode was an object, resetting to default');
                             coreAdviseMode = "standard cores";
                             this.$settingsStore.adviserSettings.coreAdviseMode = coreAdviseMode;
                         }
                         
                         // Final safety: ensure it's a string
                         coreAdviseMode = String(coreAdviseMode);
-                        console.log('[MagneticAdviser] final coreAdviseMode:', coreAdviseMode);
                         
                         const aux = await this.taskQueueStore.calculateAdvisedMagnetics(
                             this.masStore.mas.inputs,
@@ -185,13 +179,7 @@ export default {
         },
         showDetails(index) {
             this.detailMas = deepCopy(this.adviseCacheStore.currentMasAdvises[index].mas);
-            nextTick(() => {
-                const offcanvasEl = document.getElementById('CoreAdviserDetailOffCanvas');
-                if (offcanvasEl) {
-                    const offcanvas = Offcanvas.getOrCreateInstance(offcanvasEl);
-                    offcanvas.show();
-                }
-            });
+            this.adviseDetailsVisible = true;
         },
         adviseReady(index) {
             if (this.currentAdviseToShow < this.adviseCacheStore.currentMasAdvises.length - 1) {
@@ -205,7 +193,31 @@ export default {
         loadAndGoToBuilder() {
             // Load the selected advise into masStore.mas
             if (this.adviseCacheStore.currentMasAdvises.length > 0 && this.$userStore.magneticAdviserSelectedAdvise != null) {
+                // Snapshot wound_with groups by winding name from the current
+                // (pre-advise) coil so we can re-apply them after setMas. The
+                // adviser regenerates functionalDescription from scratch and
+                // strips woundWith; without re-applying, center-tap wizards
+                // (AHB-CT, Push-Pull, Forward-CT) lose the section-sharing
+                // hint and a subsequent BasicCoilSelector.wind() throws
+                // "Number of slots cannot be less than 1".
+                const woundWithByName = {};
+                const fdBefore = this.masStore.mas?.magnetic?.coil?.functionalDescription;
+                if (Array.isArray(fdBefore)) {
+                    for (const w of fdBefore) {
+                        if (w?.name && Array.isArray(w.woundWith) && w.woundWith.length > 0) {
+                            woundWithByName[w.name] = [...w.woundWith];
+                        }
+                    }
+                }
                 this.masStore.setMas(deepCopy(this.adviseCacheStore.currentMasAdvises[this.$userStore.magneticAdviserSelectedAdvise].mas));
+                const fdAfter = this.masStore.mas?.magnetic?.coil?.functionalDescription;
+                if (Array.isArray(fdAfter) && Object.keys(woundWithByName).length > 0) {
+                    for (const w of fdAfter) {
+                        if (w?.name && woundWithByName[w.name]) {
+                            w.woundWith = woundWithByName[w.name];
+                        }
+                    }
+                }
             }
             // Navigate back to magneticBuilder
             this.$stateStore.getCurrentToolState().subsection = 'magneticBuilder';
@@ -220,14 +232,14 @@ export default {
 </script>
 
 <template>
-    <AdviseDetails v-if="detailMas" :modelValue="detailMas"/>
+    <AdviseDetails v-if="detailMas" v-model:visible="adviseDetailsVisible" :modelValue="detailMas"/>
     <div class="container-fluid py-3">
         <div class="row g-3">
             <!-- Sidebar Panel -->
-            <aside class="col-12 col-lg-3">
+            <aside class="col-12 lg:col-3">
                 <div class="optim-panel h-100">
                     <div class="optim-header">
-                        <i class="fa-solid fa-sliders"></i>
+                        <i class="pi pi-sliders-h"></i>
                         <span>Optimization Weights</span>
                     </div>
                     <div class="optim-body">
@@ -279,7 +291,7 @@ export default {
                             class="optim-btn optim-btn-primary"
                             @click="calculateAdvises"
                         >
-                            <i class="fa-solid fa-rocket"></i>
+                            <i class="pi pi-send"></i>
                             <span>Get Advised Magnetics</span>
                         </button>
                         <button
@@ -288,7 +300,7 @@ export default {
                             class="optim-btn optim-btn-success"
                             @click="loadAndGoToBuilder"
                         >
-                            <i class="fa-solid fa-check"></i>
+                            <i class="pi pi-check"></i>
                             <span>Load Selected</span>
                         </button>
                         <button
@@ -297,7 +309,7 @@ export default {
                             class="optim-btn optim-btn-outline-danger"
                             @click="goBackToBuilder"
                         >
-                            <i class="fa-solid fa-arrow-left"></i>
+                            <i class="pi pi-arrow-left"></i>
                             <span>Go Back</span>
                         </button>
                     </div>
@@ -305,9 +317,9 @@ export default {
             </aside>
 
             <!-- Main Content Area -->
-            <main class="col-12 col-lg-9">
+            <main class="col-12 lg:col-9">
                 <!-- Loading State -->
-                <div v-if="loading" class="d-flex flex-column align-items-center justify-content-center" style="min-height: 400px;">
+                <div v-if="loading" data-cy="magneticAdviser-loading" class="d-flex flex-column align-items-center justify-content-center" style="min-height: 400px;">
                     <img :src="loadingGif" alt="Calculating..." class="rounded mb-3" style="width: 200px;" />
                     <p class="text-white-50">Analyzing magnetic designs...</p>
                 </div>
@@ -315,11 +327,10 @@ export default {
                 <!-- Results Grid -->
                 <div v-else class="row g-3" style="max-height: calc(100vh - 220px); overflow-y: auto;">
                     <TransitionGroup name="card-fade">
-                        <div 
-                            v-for="(advise, adviseIndex) in adviseCacheStore.currentMasAdvises" 
-                            v-if="adviseCacheStore.currentMasAdvises != null"
-                            :key="adviseIndex"
-                            class="col-12 col-md-6 col-xl-4"
+                        <div
+                            v-for="(advise, adviseIndex) in adviseCacheStore.currentMasAdvises"
+                            :key="advise.mas.magnetic.manufacturerInfo.reference + '-' + adviseIndex"
+                            class="col-12 md:col-6 xl:col-4"
                             :class="{ 'opacity-25': !dataUptoDate }"
                         >
                             <Advise
@@ -342,7 +353,7 @@ export default {
                         <div class="d-flex flex-column align-items-center justify-content-center text-center py-5">
                             <div style="font-size: 4rem; opacity: 0.5;">🧲</div>
                             <h4 class="text-white-50 mt-3">No Results Yet</h4>
-                            <p class="text-muted">Configure your preferences and click "Get Advised Magnetics" to start</p>
+                            <p class="text-color-secondary">Configure your preferences and click "Get Advised Magnetics" to start</p>
                         </div>
                     </div>
                 </div>
@@ -354,14 +365,14 @@ export default {
 <style scoped>
 /* Slider styling */
 .slider-primary {
-    --slider-connect-bg: var(--bs-primary);
-    --slider-handle-bg: var(--bs-primary);
-    --slider-bg: rgba(255, 255, 255, 0.1);
+    --slider-connect-bg: var(--p-primary);
+    --slider-handle-bg: var(--p-primary);
+    --slider-bg: rgba(var(--p-white-rgb), 0.1);
 }
 
 /* Setting item hover effect */
 .setting-item:hover {
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(var(--p-white-rgb), 0.03);
     margin-left: -1rem;
     margin-right: -1rem;
     padding-left: 1rem;
@@ -370,25 +381,25 @@ export default {
 }
 
 /* ============ Optimization Weights panel ============ */
-/* Theme shim: --bs-light is actually #2a2a2a (dark) and --bs-white is #d4d4d4 in this app,
+/* Theme shim: --p-light is actually #2a2a2a (dark) and --p-white is var(--p-light) in this app,
    so semantic "light text" tokens must be built from literal rgb white. */
 .optim-panel {
-    --op-panel-1: color-mix(in srgb, var(--bs-light) 92%, #ffffff 8%);
-    --op-panel-2: var(--bs-light);
-    --op-border: rgba(255, 255, 255, 0.1);
-    --op-border-strong: rgba(255, 255, 255, 0.2);
-    --op-text: #f2f2f2;
-    --op-text-muted: rgba(242, 242, 242, 0.7);
+    --op-panel-1: color-mix(in srgb, var(--p-light) 92%, var(--p-white) 8%);
+    --op-panel-2: var(--p-light);
+    --op-border: rgba(var(--p-white-rgb), 0.1);
+    --op-border-strong: rgba(var(--p-white-rgb), 0.2);
+    --op-text: var(--p-white);
+    --op-text-color-secondary: rgba(var(--p-white-rgb), 0.7);
 
     display: flex;
     flex-direction: column;
     background: linear-gradient(180deg, var(--op-panel-1) 0%, var(--op-panel-2) 100%);
     border: 1px solid var(--op-border);
-    border-left: 3px solid rgba(var(--bs-primary-rgb), 0.8);
+    border-left: 3px solid rgba(var(--p-primary-rgb), 0.8);
     border-radius: 14px;
     box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        0 6px 20px rgba(var(--p-black-rgb), 0.5),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.06);
     overflow: hidden;
 }
 
@@ -397,9 +408,9 @@ export default {
     align-items: center;
     gap: 0.55rem;
     padding: 0.75rem 1rem;
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--p-white-rgb), 0.04);
     border-bottom: 1px solid var(--op-border);
-    color: var(--bs-primary);
+    color: var(--p-primary);
     font-weight: 600;
     font-size: 0.95rem;
     letter-spacing: 0.01em;
@@ -407,7 +418,7 @@ export default {
 
 .optim-header i {
     font-size: 1rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.45));
+    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.45));
 }
 
 .optim-body {
@@ -442,7 +453,7 @@ export default {
 }
 
 .optim-item-sub {
-    color: var(--op-text-muted);
+    color: var(--op-text-color-secondary);
     font-size: 0.7rem;
     line-height: 1.1;
 }
@@ -454,9 +465,9 @@ export default {
     border-radius: 999px;
     font-size: 0.72rem;
     font-weight: 700;
-    background: rgba(var(--bs-primary-rgb), 0.22);
-    color: var(--bs-primary);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.5);
+    background: rgba(var(--p-primary-rgb), 0.22);
+    color: var(--p-primary);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.5);
 }
 
 .optim-footer {
@@ -465,7 +476,7 @@ export default {
     gap: 0.45rem;
     padding: 0.85rem 0.95rem 0.95rem 0.95rem;
     border-top: 1px solid var(--op-border);
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--p-white-rgb), 0.03);
 }
 
 .optim-btn {
@@ -498,41 +509,41 @@ export default {
 
 .optim-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: #ffffff;
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, #ffffff 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .optim-btn-success {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-success) 115%, transparent 0%) 0%,
-        var(--bs-success) 55%,
-        rgb(var(--bs-success-rgb) / 0.85) 100%);
-    color: #ffffff;
-    border: 1px solid color-mix(in srgb, var(--bs-success) 70%, #ffffff 30%);
+        color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
+        var(--p-success) 55%,
+        rgb(var(--p-success-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-success-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-success-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-success-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-success-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .optim-btn-outline-danger {
-    background: rgb(var(--bs-danger-rgb) / 0.15);
-    border: 1px solid rgb(var(--bs-danger-rgb) / 0.55);
-    color: var(--bs-danger);
+    background: rgb(var(--p-danger-rgb) / 0.15);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.55);
+    color: var(--p-danger);
 }
 
 .optim-btn-outline-danger:hover:not(:disabled) {
-    background: rgb(var(--bs-danger-rgb) / 0.25);
-    border-color: rgb(var(--bs-danger-rgb) / 0.75);
+    background: rgb(var(--p-danger-rgb) / 0.25);
+    border-color: rgb(var(--p-danger-rgb) / 0.75);
 }
 
 /* Transitions */
