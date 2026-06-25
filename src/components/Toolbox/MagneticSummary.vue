@@ -348,7 +348,6 @@ export default {
                             description: thickness && thickness.label > 0
                                 ? `Apply ${material} (${removeTrailingZeroes(thickness.label, 2)} ${thickness.unit})` 
                                 : `Apply ${material}`,
-                            icon: 'fa-tape',
                             isolation: null
                         });
                     } else if (layerType === 'conduction') {
@@ -387,7 +386,6 @@ export default {
                             step: stepNum++,
                             type: 'winding',
                             description: `Wind ${toTitleCase(windingName)}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
-                            icon: 'fa-rotate',
                             isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
@@ -403,7 +401,6 @@ export default {
                             step: stepNum++,
                             type: 'insulation',
                             description: 'Apply insulation layer',
-                            icon: 'fa-tape',
                             isolation: null
                         });
                     } else if (sectionType === 'conduction') {
@@ -416,7 +413,6 @@ export default {
                             step: stepNum++,
                             type: 'winding',
                             description: `Wind ${toTitleCase(windingName)}: ${totalTurns} turns`,
-                            icon: 'fa-rotate',
                             isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
@@ -446,8 +442,7 @@ export default {
                     }
                     result.push({
                         step: result.length + 1,
-                        description: `${prefix}${name} to ${type} ${pin}`,
-                        icon: 'fa-plug'
+                        description: `${prefix}${name} to ${type} ${pin}`
                     });
                 });
             });
@@ -1006,13 +1001,8 @@ export default {
                          class="construction-step" 
                          :class="{ 'step-insulation': step.type === 'insulation', 'step-winding': step.type === 'winding' }">
                         <div class="step-number">{{ step.step }}</div>
-                        <div class="step-icon">
-                            <i :class="'fa-solid ' + step.icon"></i>
-                        </div>
                         <div class="step-description">{{ step.description }}</div>
-                        <div v-if="step.isolation" class="step-isolation" :title="'Isolation side: ' + step.isolation">
-                            <i class="fa-solid fa-shield-halved"></i>{{ step.isolation }}
-                        </div>
+                        <div v-if="step.isolation" class="step-isolation" :title="'Isolation side: ' + step.isolation">{{ step.isolation }}</div>
                     </div>
                 </div>
             </div>
@@ -1024,9 +1014,6 @@ export default {
                     <div v-for="step in windingTerminations" :key="step.step"
                          class="construction-step step-connection">
                         <div class="step-number">{{ step.step }}</div>
-                        <div class="step-icon">
-                            <i :class="'fa-solid ' + step.icon"></i>
-                        </div>
                         <div class="step-description">{{ step.description }}</div>
                     </div>
                 </div>
@@ -1427,16 +1414,6 @@ export default {
     color: var(--bs-dark);
 }
 
-.step-icon {
-    color: var(--bs-primary);
-    font-size: 14px;
-    flex-shrink: 0;
-}
-
-.step-insulation .step-icon {
-    color: rgb(var(--bs-warning-rgb));
-}
-
 .step-description {
     font-size: 11px;
     color: #d4d4d4;
@@ -1700,10 +1677,6 @@ export default {
     
     .step-insulation .step-number {
         background: #ffc107;
-    }
-    
-    .step-insulation .step-icon {
-        color: #856404;
     }
     
     .excitation-card {
