@@ -26,6 +26,7 @@ import Aura from '@primeuix/themes/aura'
 import { definePreset } from '@primeuix/themes'
 import 'primeicons/primeicons.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
+import '@fortawesome/fontawesome-free/css/all.min.css';
 // primeflex.css is imported from src/assets/scss/custom.scss after the
 // theme-base so PrimeFlex's grid utilities win the cascade for col-N.
 
@@ -278,7 +279,7 @@ router.beforeEach((to, from, next) => {
         setTimeout(() => {router.push(newPath);}, 500);
     }
 
-    const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`]
+    const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`, `${import.meta.env.BASE_URL}schematic_playground`]
 
     var loadData = !nonDataViews.includes(to.path);
 

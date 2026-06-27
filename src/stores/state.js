@@ -244,6 +244,7 @@ export const useStateStore = defineStore("state", () => {
             core: MagneticBuilderModes.Basic,
             wire: MagneticBuilderModes.Basic,
             coil: MagneticBuilderModes.Basic,
+            terminal: MagneticBuilderModes.Basic,
         },
         submode: {
             core: MagneticBuilderCoreSubmodes.Shape,
@@ -372,6 +373,7 @@ export const useStateStore = defineStore("state", () => {
                 core: MagneticBuilderModes.Basic,
                 wire: MagneticBuilderModes.Basic,
                 coil: MagneticBuilderModes.Basic,
+                terminal: MagneticBuilderModes.Basic,
             },
             submode: {
                 core: MagneticBuilderCoreSubmodes.Shape,

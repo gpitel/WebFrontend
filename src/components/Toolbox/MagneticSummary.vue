@@ -2,13 +2,13 @@
 import { useMasStore } from '../../stores/mas'
 import { useTaskQueueStore } from '../../stores/taskQueue'
 import { toTitleCase, removeTrailingZeroes, formatUnit, formatDimension, formatTemperature, formatInductance,
-         formatPower, formatResistance, deepCopy, downloadBase64asPDF, clean, download, isMobile } from 'WebSharedComponents/assets/js/utils.js'
-import Magnetic2DVisualizer, { PLOT_MODES } from 'WebSharedComponents/Common/Magnetic2DVisualizer.vue'
+         formatPower, formatResistance, deepCopy, downloadBase64asPDF, clean, download, isMobile } from '/WebSharedComponents/assets/js/utils.js'
+import Magnetic2DVisualizer, { PLOT_MODES } from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
 import CoreExporter from '../Exporters/CoreExporter.vue'
 import CoilExporter from '../Exporters/CoilExporter.vue'
 import MASExporter from '../Exporters/MASExporter.vue'
 import CircuitSimulatorsExporter from '../Exporters/CircuitSimulatorsExporter.vue'
-import { recordDesign } from 'WebSharedComponents/assets/js/telemetry.js'
+import { coilToTikz } from '/WebSharedComponents/assets/js/coilToTikz.js'
 </script>
 
 <script>
@@ -31,10 +31,7 @@ export default {
             includeFringing: true,
             PLOT_MODES,
             processedMas: null,
-            coreExporterVisible: false,
-            coilExporterVisible: false,
-            masExporterVisible: false,
-            circuitExporterVisible: false,
+            schematicSvg: '',
         }
     },
     computed: {
@@ -79,28 +76,25 @@ export default {
             if (outputs?.magnetizingInductance?.magnetizingInductance) {
                 const val = outputs.magnetizingInductance.magnetizingInductance.nominal || outputs.magnetizingInductance.magnetizingInductance;
                 const aux = formatInductance(val);
-                params.push({ label: 'Inductance', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'bi-infinity' });
+                params.push({ label: 'Inductance', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'fa-infinity' });
             }
 
             if (outputs?.coreLosses?.coreLosses != null) {
-                if (outputs.coreLosses.coreLosses < 0) {
-                    console.error('[MagneticSummary] Negative core losses received from MKF:', outputs.coreLosses.coreLosses, 'methodUsed:', outputs.coreLosses.methodUsed, 'material:', this.mas?.magnetic?.core?.functionalDescription?.material?.name ?? this.mas?.magnetic?.core?.functionalDescription?.material);
-                }
                 const aux = formatPower(outputs.coreLosses.coreLosses);
-                params.push({ label: 'Core Loss', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'bi-fire' });
+                params.push({ label: 'Core Loss', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'fa-fire' });
             }
 
             if (outputs?.windingLosses?.windingLosses != null) {
                 const aux = formatPower(outputs.windingLosses.windingLosses);
-                params.push({ label: 'Winding Loss', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'bi-lightning-fill' });
+                params.push({ label: 'Winding Loss', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'fa-bolt' });
             }
 
             if (outputs?.coreLosses?.magneticFluxDensity?.processed?.peak) {
                 const aux = formatUnit(outputs.coreLosses.magneticFluxDensity.processed.peak, 'T');
-                params.push({ label: 'Peak B', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'bi-magnet-fill' });
+                params.push({ label: 'Peak B', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'fa-magnet' });
             }
 
-            params.push({ label: 'Core', value: this.coreShape, unit: '', icon: 'bi-box' });
+            params.push({ label: 'Core', value: this.coreShape, unit: '', icon: 'fa-cube' });
 
             return params;
         },
@@ -312,13 +306,13 @@ export default {
             const groups = this.mas?.magnetic?.coil?.groupsDescription || [];
             if (groups.length > 0) {
                 // If any group is "Printed", "Stamped", or "Deposition", it's not wound
-                const nonWoundTypes = ['printed', 'stamped', 'deposition'];
-                const hasNonWound = groups.some(g => nonWoundTypes.includes(g.type?.toLowerCase()));
+                const nonWoundTypes = ['Printed', 'Stamped', 'Deposition'];
+                const hasNonWound = groups.some(g => nonWoundTypes.includes(g.type));
                 return !hasNonWound;
             }
             // Also check design requirements wiring technology
             const wiringTech = this.mas?.inputs?.designRequirements?.wiringTechnology;
-            if (wiringTech && wiringTech.toLowerCase() !== 'wound') {
+            if (wiringTech && wiringTech !== 'Wound') {
                 return false;
             }
             return true;
@@ -354,7 +348,7 @@ export default {
                             description: thickness && thickness.label > 0
                                 ? `Apply ${material} (${removeTrailingZeroes(thickness.label, 2)} ${thickness.unit})` 
                                 : `Apply ${material}`,
-                            icon: 'bi-record-circle'
+                            isolation: null
                         });
                     } else if (layerType === 'conduction') {
                         const partialWinding = layer.partialWindings?.[0];
@@ -392,7 +386,7 @@ export default {
                             step: stepNum++,
                             type: 'winding',
                             description: `Wind ${toTitleCase(windingName)}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
-                            icon: 'bi-arrow-repeat'
+                            isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
                 });
@@ -407,7 +401,7 @@ export default {
                             step: stepNum++,
                             type: 'insulation',
                             description: 'Apply insulation layer',
-                            icon: 'bi-record-circle'
+                            isolation: null
                         });
                     } else if (sectionType === 'conduction') {
                         const partialWinding = section.partialWindings?.[0];
@@ -419,7 +413,7 @@ export default {
                             step: stepNum++,
                             type: 'winding',
                             description: `Wind ${toTitleCase(windingName)}: ${totalTurns} turns`,
-                            icon: 'bi-arrow-repeat'
+                            isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
                 });
@@ -427,15 +421,39 @@ export default {
             
             return steps;
         },
+        windingTerminations() {
+            const windings = this.mas?.magnetic?.coil?.functionalDescription || [];
+            // One step per connection, grouped by winding (in functionalDescription
+            // order): "Start of"/"End of" <winding> to <type> <pin>, e.g. "Start of Primary to Pin 3".
+            const result = [];
+            windings.forEach((winding, index) => {
+                const name = toTitleCase(winding.name?.toLowerCase() || `Winding ${index + 1}`);
+                const connections = winding?.connections || [];
+                connections.forEach((c, ci) => {
+                    const type = c.type || 'Pin';
+                    const pin = (c.pinName != null && c.pinName !== '') ? c.pinName : '?';
+                    // Connections are ordered start-then-finish: the first is the
+                    // winding's start lead, the last is its end lead.
+                    let prefix = '';
+                    if (ci === 0) {
+                        prefix = 'Start of ';
+                    } else if (ci === connections.length - 1) {
+                        prefix = 'End of ';
+                    }
+                    result.push({
+                        step: result.length + 1,
+                        description: `${prefix}${name} to ${type} ${pin}`
+                    });
+                });
+            });
+            return result;
+        },
         performanceData() {
             const data = [];
             const outputs = this.mas?.outputs?.[0];
             
             // Core losses
             if (outputs?.coreLosses?.coreLosses != null) {
-                if (outputs.coreLosses.coreLosses < 0) {
-                    console.error('[MagneticSummary] Negative core losses received from MKF:', outputs.coreLosses.coreLosses, 'methodUsed:', outputs.coreLosses.methodUsed, 'material:', this.mas?.magnetic?.core?.functionalDescription?.material?.name ?? this.mas?.magnetic?.core?.functionalDescription?.material);
-                }
                 const aux = formatPower(outputs.coreLosses.coreLosses);
                 data.push({ parameter: 'Core Losses (Pcore)', value: `${removeTrailingZeroes(aux.label, 3)} ${aux.unit}` });
             }
@@ -572,11 +590,22 @@ export default {
     },
     mounted() {
         this.computeTexts();
-        // Reaching the magnetic-adviser report = a finished design (screenshot-safe,
-        // counted even if the user never downloads anything).
-        recordDesign({ event_type: 'design_report', source: 'adviser', mas: this.mas });
+        this.renderSchematic();
     },
     methods: {
+        renderSchematic() {
+            // Build the coil's electrical schematic (coilToTikz) and render it to an
+            // inline SVG via the backend's /process_latex_svg; omit silently if the
+            // coil has no connections or the renderer endpoint is unavailable.
+            const coil = this.mas?.magnetic?.coil;
+            if (!coil || !(coil.functionalDescription || []).length) return;
+            let tikz;
+            try { tikz = coilToTikz(coil); } catch (e) { return; }
+            const base = import.meta.env.VITE_API_ENDPOINT || 'http://localhost:8001';
+            this.$axios.post(`${base}/process_latex_svg`, tikz)
+                .then((response) => { this.schematicSvg = response.data; })
+                .catch(() => { /* no /process_latex_svg backend -- skip the schematic */ });
+        },
         plotModeChange(newMode) {
             this.plotMode = newMode;
         },
@@ -638,30 +667,30 @@ export default {
 <template>
     <div class="datasheet-wrapper">
         <!-- Exporters -->
-        <CoreExporter v-model:visible="coreExporterVisible" :data-cy="dataTestLabel + '-CoreExporter'"/>
-        <CoilExporter v-model:visible="coilExporterVisible" :data-cy="dataTestLabel + '-CoilExporter'" />
-        <MASExporter v-model:visible="masExporterVisible" :data-cy="dataTestLabel + '-MASExporter'" />
-        <CircuitSimulatorsExporter v-model:visible="circuitExporterVisible" :data-cy="dataTestLabel + '-CircuitSimulatorsExporter'" />
-
+        <CoreExporter :data-cy="dataTestLabel + '-CoreExporter'"/>
+        <CoilExporter :data-cy="dataTestLabel + '-CoilExporter'" />
+        <MASExporter :data-cy="dataTestLabel + '-MASExporter'" />
+        <CircuitSimulatorsExporter :data-cy="dataTestLabel + '-CircuitSimulatorsExporter'" />
+        
         <!-- Toolbar (hidden when printing) -->
         <div class="datasheet-toolbar d-print-none">
             <div class="toolbar-left">
-                <button :data-cy="dataTestLabel + '-download-MAS-File-button'" class="summary-btn summary-btn-primary mr-2" @click="masExporterVisible = true">
-                    <i class="pi pi-file-export mr-1"></i> MAS
+                <button class="summary-btn summary-btn-primary me-2" data-bs-toggle="modal" data-bs-target="#MASExporterModal">
+                    <i class="fa-solid fa-file-export me-1"></i> MAS
                 </button>
-                <button class="summary-btn summary-btn-primary mr-2" @click="coreExporterVisible = true">
-                    <i class="pi pi-box mr-1"></i> Core
+                <button class="summary-btn summary-btn-primary me-2" data-bs-toggle="modal" data-bs-target="#CoreExporterModal">
+                    <i class="fa-solid fa-cube me-1"></i> Core
                 </button>
-                <button class="summary-btn summary-btn-primary mr-2" @click="coilExporterVisible = true">
-                    <i class="pi pi-link mr-1"></i> Coil
+                <button class="summary-btn summary-btn-primary me-2" data-bs-toggle="modal" data-bs-target="#CoilExporterModal">
+                    <i class="fa-solid fa-coil me-1"></i> Coil
                 </button>
-                <button class="summary-btn summary-btn-danger" @click="circuitExporterVisible = true">
-                    <i class="pi pi-microchip mr-1"></i> Circuit Sim
+                <button class="summary-btn summary-btn-danger" data-bs-toggle="modal" data-bs-target="#CircuitSimulatorsExporterModal">
+                    <i class="fa-solid fa-microchip me-1"></i> Circuit Sim
                 </button>
             </div>
             <div class="toolbar-right">
-                <button :data-cy="dataTestLabel + '-download-PDF-File-button'" class="summary-btn summary-btn-outline" @click="printDatasheet">
-                    <i class="pi pi-print mr-1"></i> Print / Save PDF
+                <button class="summary-btn summary-btn-outline" @click="printDatasheet">
+                    <i class="fa-solid fa-print me-1"></i> Print / Save PDF
                 </button>
             </div>
         </div>
@@ -673,7 +702,7 @@ export default {
                 <div class="header-content">
                     <div class="header-left">
                         <div class="header-badge">
-                            <i class="pi pi-microchip"></i>
+                            <i class="fa-solid fa-microchip"></i>
                             <span>Datasheet</span>
                         </div>
                         <h1 class="part-number">{{ partNumber }}</h1>
@@ -690,7 +719,7 @@ export default {
             <!-- Key Parameters Box -->
             <div class="key-params-box">
                 <div class="key-param" v-for="param in keyParameters" :key="param.label">
-                    <div class="key-param-icon"><i :class="'bi ' + param.icon"></i></div>
+                    <div class="key-param-icon"><i :class="'fa-solid ' + param.icon"></i></div>
                     <div class="key-param-body">
                         <div class="param-label">{{ param.label }}</div>
                         <div class="param-value-row">
@@ -703,7 +732,7 @@ export default {
 
             <!-- Visualizer Section -->
             <div class="section">
-                <h3 class="section-title"><i class="pi pi-box"></i>Component Visualization</h3>
+                <h3 class="section-title"><i class="fa-solid fa-cube"></i>Component Visualization</h3>
                 <div class="visualizer-container">
                     <Magnetic2DVisualizer
                         :modelValue="mas"
@@ -718,7 +747,7 @@ export default {
 
             <!-- Electrical Specifications -->
             <div class="section">
-                <h3 class="section-title"><i class="pi pi-bolt"></i>Electrical Specifications</h3>
+                <h3 class="section-title"><i class="fa-solid fa-bolt"></i>Electrical Specifications</h3>
                 <table class="spec-table">
                     <thead>
                         <tr>
@@ -743,7 +772,7 @@ export default {
 
             <!-- Operating Point Details -->
             <div class="section" v-if="operatingPointData">
-                <h3 class="section-title"><i class="pi pi-volume-up"></i>Operating Point Excitation</h3>
+                <h3 class="section-title"><i class="fa-solid fa-wave-square"></i>Operating Point Excitation</h3>
                 <p class="test-conditions">
                     <template v-if="operatingPointData.conditions.ambientTemperature">
                         T<sub>amb</sub> = {{ operatingPointData.conditions.ambientTemperature }}°C
@@ -766,7 +795,7 @@ export default {
                         <!-- Voltage -->
                         <div class="signal-block" v-if="ex.voltage">
                             <div class="signal-header voltage-header">
-                                <i class="pi pi-bolt"></i> Voltage
+                                <i class="fa-solid fa-bolt"></i> Voltage
                                 <span class="waveform-label">{{ ex.voltage.label }}</span>
                             </div>
                             <div class="signal-details">
@@ -805,7 +834,7 @@ export default {
                         <!-- Current -->
                         <div class="signal-block" v-if="ex.current">
                             <div class="signal-header current-header">
-                                <i class="pi pi-volume-up"></i> Current
+                                <i class="fa-solid fa-wave-square"></i> Current
                                 <span class="waveform-label">{{ ex.current.label }}</span>
                             </div>
                             <div class="signal-details">
@@ -848,7 +877,7 @@ export default {
             <div class="two-column-section">
                 <div class="column">
                     <div class="section">
-                        <h3 class="section-title"><i class="pi pi-box"></i>Core Data</h3>
+                        <h3 class="section-title"><i class="fa-solid fa-cube"></i>Core Data</h3>
                         <table class="data-table">
                             <tbody>
                                 <tr v-for="(item, index) in coreData" :key="item.parameter" :class="{ 'alt-row': index % 2 === 1 }">
@@ -861,7 +890,7 @@ export default {
                     
                     <!-- Gapping Table -->
                     <div class="section" v-if="gappingData.length > 0">
-                        <h3 class="section-title"><i class="pi pi-arrows-h"></i>Core Gapping</h3>
+                        <h3 class="section-title"><i class="fa-solid fa-ruler-horizontal"></i>Core Gapping</h3>
                         <table class="spec-table compact">
                             <thead>
                                 <tr>
@@ -882,7 +911,7 @@ export default {
                     
                     <!-- Material Data -->
                     <div class="section" v-if="materialData.length > 0">
-                        <h3 class="section-title"><i class="pi pi-bolt"></i>Material Properties</h3>
+                        <h3 class="section-title"><i class="fa-solid fa-flask"></i>Material Properties</h3>
                         <table class="data-table">
                             <tbody>
                                 <tr v-for="(item, index) in materialData" :key="item.parameter" :class="{ 'alt-row': index % 2 === 1 }">
@@ -895,7 +924,7 @@ export default {
                 </div>
                 <div class="column">
                     <div class="section">
-                        <h3 class="section-title"><i class="pi pi-database"></i>Winding Configuration</h3>
+                        <h3 class="section-title"><i class="fa-solid fa-layer-group"></i>Winding Configuration</h3>
                         <table class="spec-table">
                             <thead>
                                 <tr>
@@ -918,7 +947,7 @@ export default {
                     
                     <!-- Performance Analysis -->
                     <div class="section">
-                        <h3 class="section-title"><i class="pi pi-gauge"></i>Performance Analysis</h3>
+                        <h3 class="section-title"><i class="fa-solid fa-gauge-high"></i>Performance Analysis</h3>
                         <p class="test-conditions">
                             Test Conditions: f = {{ operatingFrequency }}, T<sub>amb</sub> = {{ ambientTemperature }}
                         </p>
@@ -935,7 +964,7 @@ export default {
                     
                     <!-- Winding Performance -->
                     <div class="section" v-if="windingPerformance.length > 0">
-                        <h3 class="section-title"><i class="pi pi-chart-line"></i>Winding Performance</h3>
+                        <h3 class="section-title"><i class="fa-solid fa-chart-line"></i>Winding Performance</h3>
                         <table class="spec-table compact">
                             <thead>
                                 <tr>
@@ -958,24 +987,40 @@ export default {
                 </div>
             </div>
 
+            <!-- Electrical Schematic -->
+            <div class="section" v-if="schematicSvg">
+                <h3 class="section-title"><i class="fa-solid fa-diagram-project"></i>Schematic</h3>
+                <div class="schematic" v-html="schematicSvg"></div>
+            </div>
+
             <!-- Winding Construction Steps -->
             <div class="section" v-if="isWoundMagnetic && windingConstructionSteps.length > 0">
-                <h3 class="section-title"><i class="pi pi-list"></i>Winding Construction Steps</h3>
+                <h3 class="section-title"><i class="fa-solid fa-list-check"></i>Winding Construction Steps</h3>
                 <div class="construction-steps">
                     <div v-for="step in windingConstructionSteps" :key="step.step" 
                          class="construction-step" 
                          :class="{ 'step-insulation': step.type === 'insulation', 'step-winding': step.type === 'winding' }">
                         <div class="step-number">{{ step.step }}</div>
-                        <div class="step-icon">
-                            <i :class="'bi ' + step.icon"></i>
-                        </div>
+                        <div class="step-description">{{ step.description }}</div>
+                        <div v-if="step.isolation" class="step-isolation" :title="'Isolation side: ' + step.isolation">{{ step.isolation }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Winding Termination -->
+            <div class="section" v-if="isWoundMagnetic && windingTerminations.length > 0">
+                <h3 class="section-title"><i class="fa-solid fa-plug"></i>Winding Termination</h3>
+                <div class="construction-steps">
+                    <div v-for="step in windingTerminations" :key="step.step"
+                         class="construction-step step-connection">
+                        <div class="step-number">{{ step.step }}</div>
                         <div class="step-description">{{ step.description }}</div>
                     </div>
                 </div>
             </div>
 
             <div class="document-footer">
-                <i class="pi pi-info-circle"></i>
+                <i class="fa-solid fa-circle-info"></i>
                 <span>Auto-generated from design specs and simulation. Verify before production use.</span>
                 <span class="footer-brand">OpenMagnetics</span>
             </div>
@@ -984,6 +1029,8 @@ export default {
 </template>
 
 <style scoped>
+.schematic { display: flex; justify-content: center; padding: .5rem 0; filter: invert(1); }
+.schematic :deep(svg) { max-width: 100%; max-height: 460px; width: auto; height: auto; }
 .datasheet-wrapper {
     background: var(--p-dark);
     min-height: 100vh;
@@ -1004,7 +1051,7 @@ export default {
     border: 1px solid rgba(var(--p-primary-rgb), 0.2);
     border-left: 3px solid rgba(var(--p-primary-rgb), 0.7);
     border-radius: 12px;
-    box-shadow: 0 4px 14px rgba(var(--p-black-rgb), 0.35), inset 0 1px 0 rgba(var(--p-white-rgb), 0.05);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .toolbar-left, .toolbar-right {
@@ -1018,10 +1065,10 @@ export default {
     margin: 0 auto;
     padding: 0;
     background: var(--p-dark);
-    color: var(--p-white);
+    color: #f2f2f2;
     font-size: 11px;
     line-height: 1.4;
-    box-shadow: 0 6px 24px rgba(var(--p-black-rgb), 0.5);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
     border: 1px solid rgba(var(--p-primary-rgb), 0.18);
     border-radius: 12px;
     overflow: hidden;
@@ -1036,7 +1083,7 @@ export default {
         var(--p-dark);
     border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.18);
     border-left: 3px solid rgba(var(--p-primary-rgb), 0.7);
-    color: var(--p-white);
+    color: #f2f2f2;
     padding: 18px 24px;
 }
 
@@ -1072,19 +1119,19 @@ export default {
     font-weight: 700;
     margin: 0 0 4px 0;
     letter-spacing: 0.3px;
-    color: var(--p-white);
+    color: #f2f2f2;
 }
 
 .header-left .part-description {
     font-size: 13px;
     margin: 0 0 2px 0;
-    color: rgba(var(--p-white-rgb), 0.8);
+    color: rgba(242, 242, 242, 0.8);
 }
 
 .header-left .part-type {
     font-size: 11px;
     margin: 0;
-    color: rgba(var(--p-white-rgb), 0.55);
+    color: rgba(242, 242, 242, 0.55);
 }
 
 .header-right {
@@ -1100,7 +1147,7 @@ export default {
 
 .header-right .revision {
     font-size: 10px;
-    color: rgba(var(--p-white-rgb), 0.55);
+    color: rgba(242, 242, 242, 0.55);
     margin-top: 4px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1154,7 +1201,7 @@ export default {
 
 .key-param .param-label {
     font-size: 9px;
-    color: rgba(var(--p-white-rgb), 0.65);
+    color: rgba(242, 242, 242, 0.65);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
@@ -1177,7 +1224,7 @@ export default {
 
 .key-param .param-unit {
     font-size: 11px;
-    color: rgba(var(--p-white-rgb), 0.55);
+    color: rgba(242, 242, 242, 0.55);
 }
 
 /* Sections */
@@ -1223,8 +1270,8 @@ export default {
 
 /* Visualizer */
 .visualizer-container {
-    background: var(--p-dark);
-    border: 1px solid rgba(var(--p-white-rgb), 0.08);
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 4px;
     min-height: 200px;
     overflow: hidden;
@@ -1262,7 +1309,7 @@ export default {
 .spec-table td,
 .data-table td {
     padding: 5px 10px;
-    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .spec-table tr:last-child td,
@@ -1277,7 +1324,7 @@ export default {
 
 .spec-table .symbol {
     font-style: italic;
-    color: rgba(var(--p-white-rgb), 0.7);
+    color: rgba(242, 242, 242, 0.7);
 }
 
 .spec-table .typ-value {
@@ -1287,17 +1334,17 @@ export default {
 
 .spec-table .conditions {
     font-size: 9px;
-    color: rgba(var(--p-white-rgb), 0.45);
+    color: rgba(242, 242, 242, 0.45);
 }
 
 .data-table .param-name {
-    color: rgba(var(--p-white-rgb), 0.65);
+    color: rgba(242, 242, 242, 0.65);
 }
 
 .data-table .param-val {
     font-weight: 600;
     text-align: right;
-    color: var(--p-white);
+    color: #e6e6e6;
 }
 
 .data-table .total-row {
@@ -1309,7 +1356,7 @@ export default {
 /* Test conditions */
 .test-conditions {
     font-size: 10px;
-    color: rgba(var(--p-white-rgb), 0.65);
+    color: rgba(242, 242, 242, 0.65);
     margin-bottom: 8px;
     font-style: italic;
 }
@@ -1343,6 +1390,11 @@ export default {
     border-left-color: var(--p-primary);
 }
 
+.construction-step.step-connection {
+    background: rgba(var(--p-success-rgb), 0.1);
+    border-left-color: rgb(var(--p-success-rgb));
+}
+
 .step-number {
     display: flex;
     align-items: center;
@@ -1350,7 +1402,7 @@ export default {
     width: 22px;
     height: 22px;
     background: var(--p-primary);
-    color: var(--p-white);
+    color: white;
     border-radius: 50%;
     font-size: 11px;
     font-weight: 700;
@@ -1362,25 +1414,30 @@ export default {
     color: var(--p-dark);
 }
 
-.step-icon {
-    color: var(--p-primary);
-    font-size: 14px;
-    flex-shrink: 0;
-}
-
-.step-insulation .step-icon {
-    color: rgb(var(--p-warning-rgb));
-}
-
 .step-description {
     font-size: 11px;
-    color: var(--p-white);
+    color: #d4d4d4;
+}
+
+.step-isolation {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgb(var(--p-info-rgb));
+    background: rgba(var(--p-info-rgb), 0.12);
+    border-radius: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* Operating Point Excitation */
 .excitation-card {
     background: rgba(var(--p-primary-rgb), 0.05);
-    border: 1px solid rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     margin-bottom: 12px;
     overflow: hidden;
@@ -1392,12 +1449,12 @@ export default {
     gap: 12px;
     padding: 8px 12px;
     background: rgba(var(--p-primary-rgb), 0.15);
-    border-bottom: 1px solid rgba(var(--p-white-rgb), 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .winding-badge {
     background: var(--p-primary);
-    color: var(--p-white);
+    color: white;
     padding: 2px 10px;
     border-radius: 12px;
     font-size: 11px;
@@ -1406,7 +1463,7 @@ export default {
 
 .frequency-badge {
     font-size: 11px;
-    color: rgba(var(--p-white-rgb), 0.65);
+    color: rgba(242, 242, 242, 0.65);
     font-style: italic;
 }
 
@@ -1418,7 +1475,7 @@ export default {
 
 .signal-block {
     flex: 1;
-    background: rgba(var(--p-dark-rgb), 0.5);
+    background: rgba(26, 26, 30, 0.5);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -1471,14 +1528,14 @@ export default {
 
 .signal-param .param-label {
     font-size: 9px;
-    color: rgba(var(--p-white-rgb), 0.45);
+    color: rgba(242, 242, 242, 0.45);
     text-transform: uppercase;
 }
 
 .signal-param .param-value {
     font-size: 11px;
     font-weight: 600;
-    color: var(--p-white);
+    color: #d4d4d4;
 }
 
 .waveform-preview {
@@ -1488,7 +1545,7 @@ export default {
     background:
         radial-gradient(circle at 50% 50%,
             rgba(var(--p-primary-rgb), 0.08) 0%,
-            rgba(var(--p-dark-rgb), 0.9) 75%);
+            rgba(26, 26, 30, 0.9) 75%);
     border-radius: 6px;
     border: 1px solid rgba(var(--p-primary-rgb), 0.18);
     padding: 2px;
@@ -1502,7 +1559,7 @@ export default {
 }
 
 .waveform-baseline {
-    stroke: rgba(var(--p-white-rgb), 0.15);
+    stroke: rgba(255, 255, 255, 0.15);
     stroke-width: 1;
     stroke-dasharray: 2 3;
 }
@@ -1527,7 +1584,7 @@ export default {
     border-top: 1px solid rgba(var(--p-primary-rgb), 0.15);
     background: rgba(var(--p-primary-rgb), 0.03);
     font-size: 9px;
-    color: rgba(var(--p-white-rgb), 0.55);
+    color: rgba(242, 242, 242, 0.55);
     letter-spacing: 0.02em;
 }
 
@@ -1544,25 +1601,20 @@ export default {
 }
 
 /* Print styles */
-@page {
-    margin: 1.2cm;
-    size: A4 portrait;
-}
-
 @media print {
     .datasheet-wrapper {
-        background: var(--p-white);
+        background: white;
         padding: 0;
     }
-
+    
     .d-print-none {
         display: none !important;
     }
-
+    
     .datasheet-container {
         box-shadow: none;
         max-width: 100%;
-        background: var(--p-white);
+        background: white;
         color: #212529;
         border: none;
     }
@@ -1573,7 +1625,7 @@ export default {
     
     .key-param .param-label,
     .key-param .param-unit {
-        color: rgba(var(--p-white-rgb), 0.45);
+        color: rgba(242, 242, 242, 0.45);
     }
     
     .data-table .param-name,
@@ -1627,10 +1679,6 @@ export default {
         background: #ffc107;
     }
     
-    .step-insulation .step-icon {
-        color: #856404;
-    }
-    
     .excitation-card {
         background: #f8f9fa;
         border-color: #dee2e6;
@@ -1646,7 +1694,7 @@ export default {
     }
     
     .signal-block {
-        background: var(--p-white);
+        background: #ffffff;
     }
     
     .signal-header.voltage-header {
@@ -1689,41 +1737,10 @@ export default {
     
     .section {
         page-break-inside: avoid;
-        break-inside: avoid;
     }
-
+    
     .two-column-section {
         page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .spec-table {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .spec-table tr {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .construction-step {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .excitation-card {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .key-params-box {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .section + .section {
-        break-before: auto;
     }
 }
 
@@ -1805,7 +1822,7 @@ export default {
     box-shadow:
         0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
         0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+        inset 0 1px 0 rgba(var(--p-light-rgb), 0.3);
     text-shadow: 0 1px 1px rgba(var(--p-dark-rgb), 0.25);
 }
 
@@ -1819,7 +1836,7 @@ export default {
     box-shadow:
         0 0 0 1px rgb(var(--p-success-rgb) / 0.35),
         0 2px 8px rgb(var(--p-success-rgb) / 0.4),
-        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+        inset 0 1px 0 rgba(var(--p-light-rgb), 0.3);
     text-shadow: 0 1px 1px rgba(var(--p-dark-rgb), 0.25);
 }
 
@@ -1836,15 +1853,15 @@ export default {
 }
 
 .summary-btn-outline {
-    background: rgba(var(--p-white-rgb), 0.08);
-    border: 1px solid rgba(var(--p-white-rgb), 0.22);
-    color: var(--p-white);
+    background: rgba(var(--p-light-rgb), 0.08);
+    border: 1px solid rgba(var(--p-light-rgb), 0.22);
+    color: var(--p-light);
     box-shadow: 0 1px 4px rgba(var(--p-dark-rgb), 0.25);
 }
 
 .summary-btn-outline:hover:not(:disabled) {
-    background: rgba(var(--p-white-rgb), 0.14);
-    border-color: rgba(var(--p-white-rgb), 0.35);
+    background: rgba(var(--p-light-rgb), 0.14);
+    border-color: rgba(var(--p-light-rgb), 0.35);
     color: var(--p-white);
 }
 </style>
