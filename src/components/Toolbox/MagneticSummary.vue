@@ -32,6 +32,7 @@ export default {
             PLOT_MODES,
             processedMas: null,
             schematicSvg: '',
+            schematicRendererOffline: false,
         }
     },
     computed: {
@@ -594,9 +595,9 @@ export default {
     },
     methods: {
         renderSchematic() {
-            // Build the coil's electrical schematic (coilToTikz) and render it to an
-            // inline SVG via the backend's /process_latex_svg; omit silently if the
-            // coil has no connections or the renderer endpoint is unavailable.
+            // Render the coil schematic (coilToTikz) to SVG via the backend's
+            // /process_latex_svg; show an offline notice if the renderer is unreachable.
+            this.schematicRendererOffline = false;
             const coil = this.mas?.magnetic?.coil;
             if (!coil || !(coil.functionalDescription || []).length) return;
             let tikz;
@@ -604,7 +605,7 @@ export default {
             const base = import.meta.env.VITE_API_ENDPOINT || 'http://localhost:8001';
             this.$axios.post(`${base}/process_latex_svg`, tikz)
                 .then((response) => { this.schematicSvg = response.data; })
-                .catch(() => { /* no /process_latex_svg backend -- skip the schematic */ });
+                .catch(() => { this.schematicRendererOffline = true; });
         },
         plotModeChange(newMode) {
             this.plotMode = newMode;
@@ -988,9 +989,14 @@ export default {
             </div>
 
             <!-- Electrical Schematic -->
-            <div class="section" v-if="schematicSvg">
+            <div class="section" v-if="schematicSvg || schematicRendererOffline">
                 <h3 class="section-title"><i class="fa-solid fa-diagram-project"></i>Schematic</h3>
-                <div class="schematic" v-html="schematicSvg"></div>
+                <div v-if="schematicSvg" class="schematic" v-html="schematicSvg"></div>
+                <p v-else class="schematic-offline">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span>Schematic renderer offline — couldn't reach the rendering service.</span>
+                    <button type="button" class="schematic-retry" @click="renderSchematic">Retry</button>
+                </p>
             </div>
 
             <!-- Winding Construction Steps -->
@@ -1031,6 +1037,9 @@ export default {
 <style scoped>
 .schematic { display: flex; justify-content: center; padding: .5rem 0; filter: invert(1); }
 .schematic :deep(svg) { max-width: 100%; max-height: 460px; width: auto; height: auto; }
+.schematic-offline { display: flex; align-items: center; gap: .5rem; justify-content: center; padding: .5rem 0; color: rgba(242, 242, 242, 0.55); font-size: 12px; }
+.schematic-retry { background: transparent; border: 1px solid rgba(242, 242, 242, 0.35); color: inherit; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+.schematic-retry:hover { border-color: var(--p-primary); color: var(--p-primary); }
 .datasheet-wrapper {
     background: var(--p-dark);
     min-height: 100vh;
