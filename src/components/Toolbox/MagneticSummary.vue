@@ -294,7 +294,7 @@ export default {
                 }
                 
                 return {
-                    name: toTitleCase(w.name?.toLowerCase() || `Winding ${i + 1}`),
+                    name: w.name || `Winding ${i + 1}`,
                     turns: w.numberTurns || 'N/A',
                     parallels: w.numberParallels || 1,
                     wire: wireName
@@ -386,7 +386,7 @@ export default {
                         steps.push({
                             step: stepNum++,
                             type: 'winding',
-                            description: `Wind ${toTitleCase(windingName)}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
+                            description: `Wind ${windingName}: ${turnsDisplay} turns${parallelInfo}${wireDesc}`,
                             isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
@@ -413,7 +413,7 @@ export default {
                         steps.push({
                             step: stepNum++,
                             type: 'winding',
-                            description: `Wind ${toTitleCase(windingName)}: ${totalTurns} turns`,
+                            description: `Wind ${windingName}: ${totalTurns} turns`,
                             isolation: winding?.isolationSide ? toTitleCase(winding.isolationSide) : null
                         });
                     }
@@ -428,7 +428,7 @@ export default {
             // order): "Start of"/"End of" <winding> to <type> <pin>, e.g. "Start of Primary to Pin 3".
             const result = [];
             windings.forEach((winding, index) => {
-                const name = toTitleCase(winding.name?.toLowerCase() || `Winding ${index + 1}`);
+                const name = winding.name || `Winding ${index + 1}`;
                 const connections = winding?.connections || [];
                 connections.forEach((c, ci) => {
                     const type = c.type || 'Pin';
@@ -509,7 +509,7 @@ export default {
                 const leakAux = leak ? formatInductance(leak.nominal || leak) : null;
                 
                 return {
-                    name: toTitleCase(w.name?.toLowerCase() || `Winding ${i + 1}`),
+                    name: w.name || `Winding ${i + 1}`,
                     dcr: dcrAux ? `${removeTrailingZeroes(dcrAux.label, 2)} ${dcrAux.unit}` : '-',
                     loss: `${removeTrailingZeroes(lossAux.label, 2)} ${lossAux.unit}`,
                     leakage: leakAux ? `${removeTrailingZeroes(leakAux.label, 2)} ${leakAux.unit}` : '-'
@@ -580,7 +580,7 @@ export default {
                     }
                     
                     return {
-                        windingName: toTitleCase(windingName.toLowerCase()),
+                        windingName: windingName,
                         frequency: freqFormatted,
                         voltage: voltageInfo,
                         current: currentInfo
