@@ -351,6 +351,28 @@ export default {
                                 : `Apply ${material}`,
                             isolation: null
                         });
+                    } else if (layerType === 'shielding') {
+                        const requirement = (this.mas?.inputs?.designRequirements?.shielding || [])
+                            .find(r => r.name != null && r.name === layer.name);
+                        const material = requirement?.material || 'copper';
+                        const foilThickness = layer.dimensions?.length
+                            ? formatDimension(Math.min(...layer.dimensions))
+                            : null;
+                        const margin = requirement?.margin;
+                        let clearance = '';
+                        if (margin && margin.length === 2 && (margin[0] > 0 || margin[1] > 0)) {
+                            const top = formatDimension(margin[0]);
+                            const bottom = formatDimension(margin[1]);
+                            clearance = `, keeping ${removeTrailingZeroes(top.label, 2)} ${top.unit} / ${removeTrailingZeroes(bottom.label, 2)} ${bottom.unit} window clearance`;
+                        }
+                        steps.push({
+                            step: stepNum++,
+                            type: 'shielding',
+                            description: foilThickness
+                                ? `Place ${layer.name}: ${material} foil (${removeTrailingZeroes(foilThickness.label, 2)} ${foilThickness.unit})${clearance}`
+                                : `Place ${layer.name}: ${material} foil${clearance}`,
+                            isolation: null
+                        });
                     } else if (layerType === 'conduction') {
                         const partialWinding = layer.partialWindings?.[0];
                         const windingName = partialWinding?.winding || `Layer ${index + 1}`;
@@ -445,6 +467,19 @@ export default {
                         step: result.length + 1,
                         description: `${prefix}${name} to ${type} ${pin}`
                     });
+                });
+            });
+            // Shields terminate at a single point; the far end stays unconnected
+            const shields = this.mas?.inputs?.designRequirements?.shielding || [];
+            shields.forEach((requirement, index) => {
+                const name = requirement.name || `Shield ${index + 1}`;
+                const type = requirement.connection?.type || null;
+                const pin = (requirement.connection?.pinName != null && requirement.connection?.pinName !== '') ? requirement.connection.pinName : '?';
+                result.push({
+                    step: result.length + 1,
+                    description: type
+                        ? `${name} to ${type} ${pin} (single-point termination, far end floating)`
+                        : `${name}: single-point termination (far end floating)`
                 });
             });
             return result;
@@ -1005,7 +1040,7 @@ export default {
                 <div class="construction-steps">
                     <div v-for="step in windingConstructionSteps" :key="step.step" 
                          class="construction-step" 
-                         :class="{ 'step-insulation': step.type === 'insulation', 'step-winding': step.type === 'winding' }">
+                         :class="{ 'step-insulation': step.type === 'insulation', 'step-winding': step.type === 'winding', 'step-shielding': step.type === 'shielding' }">
                         <div class="step-number">{{ step.step }}</div>
                         <div class="step-description">{{ step.description }}</div>
                         <div v-if="step.isolation" class="step-isolation" :title="'Isolation side: ' + step.isolation">{{ step.isolation }}</div>
@@ -1397,6 +1432,11 @@ export default {
 .construction-step.step-winding {
     background: rgba(var(--p-primary-rgb), 0.1);
     border-left-color: var(--p-primary);
+}
+
+.construction-step.step-shielding {
+    background: rgba(184, 115, 51, 0.12);
+    border-left-color: #b87333;
 }
 
 .construction-step.step-connection {
