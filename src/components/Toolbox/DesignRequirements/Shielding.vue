@@ -30,12 +30,14 @@ export default {
         // Every unordered winding pair; at the requirements stage the coil is not wound
         // yet, so a shield declared here applies to every interface of its pair
         pairOptions() {
+            // pairs are referenced by winding index (0-based, like isolationSides) so
+            // renaming a winding cannot break its shields
             const names = this.windingNames;
             const options = [];
             for (let i = 0; i < names.length; i++) {
                 for (let j = i + 1; j < names.length; j++) {
                     options.push({
-                        value: names[i] + '|' + names[j],
+                        value: i + '|' + j,
                         label: names[i] + ' ↔ ' + names[j],
                     });
                 }
@@ -49,17 +51,15 @@ export default {
             if (pair.length != 2) {
                 return null;
             }
-            const names = this.windingNames;
             // normalize to the option ordering (lower winding index first)
-            if (names.indexOf(pair[0]) > names.indexOf(pair[1])) {
-                return pair[1] + '|' + pair[0];
-            }
-            return pair[0] + '|' + pair[1];
+            const low = Math.min(pair[0], pair[1]);
+            const high = Math.max(pair[0], pair[1]);
+            return low + '|' + high;
         },
         addShield() {
             const designRequirements = this.masStore.mas.inputs.designRequirements;
             const firstPair = this.pairOptions[0];
-            const betweenWindings = firstPair ? firstPair.value.split('|') : [];
+            const betweenWindings = firstPair ? firstPair.value.split('|').map(Number) : [];
             designRequirements.shielding = [
                 ...(designRequirements.shielding || []),
                 {
@@ -81,7 +81,7 @@ export default {
             if (value == null) {
                 return;
             }
-            requirement.betweenWindings = value.split('|');
+            requirement.betweenWindings = value.split('|').map(Number);
         },
     }
 }

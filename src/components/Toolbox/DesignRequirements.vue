@@ -205,10 +205,9 @@ export default {
                 this.masStore.mas.magnetic.coil.functionalDescription = newElementsCoil;
                 // drop shields that reference windings that no longer exist
                 if (this.masStore.mas.inputs.designRequirements.shielding != null) {
-                    const windingNames = newElementsCoil.map((winding) => winding.name);
                     this.masStore.mas.inputs.designRequirements.shielding =
                         this.masStore.mas.inputs.designRequirements.shielding.filter((requirement) =>
-                            (requirement.betweenWindings || []).every((name) => windingNames.includes(name)));
+                            (requirement.betweenWindings || []).every((windingIndex) => windingIndex < newLength));
                 }
                 this.masStore.updatedTurnsRatios();
 
