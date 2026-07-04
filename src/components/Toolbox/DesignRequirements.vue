@@ -15,6 +15,7 @@ import ArrayDimensionWithTolerance from './DesignRequirements/ArrayDimensionWith
 import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 import ArrayElementFromList from './DesignRequirements/ArrayElementFromList.vue'
 import Name from './DesignRequirements/Name.vue'
+import Shielding from './DesignRequirements/Shielding.vue'
 </script>
 <script>
 export default {
@@ -202,6 +203,13 @@ export default {
 
                 this.masStore.mas.inputs.designRequirements.turnsRatios = newElementsTurnsRatios;
                 this.masStore.mas.magnetic.coil.functionalDescription = newElementsCoil;
+                // drop shields that reference windings that no longer exist
+                if (this.masStore.mas.inputs.designRequirements.shielding != null) {
+                    const windingNames = newElementsCoil.map((winding) => winding.name);
+                    this.masStore.mas.inputs.designRequirements.shielding =
+                        this.masStore.mas.inputs.designRequirements.shielding.filter((requirement) =>
+                            (requirement.betweenWindings || []).every((name) => windingNames.includes(name)));
+                }
                 this.masStore.updatedTurnsRatios();
 
                 // Keep terminalType sized to the winding count (Simple fans the value out; Advanced keeps per-lead types).
@@ -423,9 +431,16 @@ export default {
                     
                 />
 
+                <Shielding class="border-bottom-1 border-solid border-300 py-2"
+                    :style = "$styleStore.designRequirements.inputBorderColor"
+                    v-if="masStore.mas.inputs.designRequirements.shielding != null"
+                    :dataTestLabel="dataTestLabel + '-Shielding'"
+                />
+
                 <ArrayDimensionWithTolerance class="border-bottom-1 border-solid border-300 py-2"
                     :style = "$styleStore.designRequirements.inputBorderColor"
-                    v-if="!masStore.hasMirroredWindings && masStore.mas.inputs.designRequirements.turnsRatios != null && masStore.mas.inputs.designRequirements.turnsRatios.length > 0"
+                    v-if="!masStore.hasMirroredWindings && masStore.mas.inputs.designRequirements.turnsRatios != null"
+                    :referenceWinding="true"
                     :name="'turnsRatios'"
                     :dataTestLabel="dataTestLabel + '-TurnsRatios'"
                     :defaultField="'nominal'"
