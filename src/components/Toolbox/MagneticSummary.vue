@@ -365,12 +365,20 @@ export default {
                             const bottom = formatDimension(margin[1]);
                             clearance = `, keeping ${removeTrailingZeroes(top.label, 2)} ${top.unit} / ${removeTrailingZeroes(bottom.label, 2)} ${bottom.unit} window clearance`;
                         }
+                        let description;
+                        if (requirement?.type === 'wound') {
+                            const screenWire = requirement?.wire ? ` of ${requirement.wire}` : '';
+                            description = `Wind ${layer.name}: single-layer screen${screenWire}${clearance}`;
+                        }
+                        else {
+                            description = foilThickness
+                                ? `Place ${layer.name}: ${material} foil (${removeTrailingZeroes(foilThickness.label, 2)} ${foilThickness.unit})${clearance}`
+                                : `Place ${layer.name}: ${material} foil${clearance}`;
+                        }
                         steps.push({
                             step: stepNum++,
                             type: 'shielding',
-                            description: foilThickness
-                                ? `Place ${layer.name}: ${material} foil (${removeTrailingZeroes(foilThickness.label, 2)} ${foilThickness.unit})${clearance}`
-                                : `Place ${layer.name}: ${material} foil${clearance}`,
+                            description,
                             isolation: null
                         });
                     } else if (layerType === 'conduction') {
