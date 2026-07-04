@@ -635,8 +635,9 @@ export default {
             this.schematicRendererOffline = false;
             const coil = this.mas?.magnetic?.coil;
             if (!coil || !(coil.functionalDescription || []).length) return;
+            const shielding = this.mas?.inputs?.designRequirements?.shielding;
             let tikz;
-            try { tikz = coilToTikz(coil); } catch (e) { return; }
+            try { tikz = coilToTikz(coil, shielding); } catch (e) { return; }
             const base = import.meta.env.VITE_API_ENDPOINT || 'http://localhost:8001';
             this.$axios.post(`${base}/process_latex_svg`, tikz)
                 .then((response) => { this.schematicSvg = response.data; })
