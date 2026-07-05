@@ -30,14 +30,14 @@ export default {
         // Every unordered winding pair; at the requirements stage the coil is not wound
         // yet, so a shield declared here applies to every interface of its pair
         pairOptions() {
-            // pairs are referenced by winding index (0-based, like isolationSides) so
-            // renaming a winding cannot break its shields
+            // windings are referenced by name, as everywhere else in MAS; renames are
+            // propagated into shield references by renameWinding()
             const names = this.windingNames;
             const options = [];
             for (let i = 0; i < names.length; i++) {
                 for (let j = i + 1; j < names.length; j++) {
                     options.push({
-                        value: i + '|' + j,
+                        value: names[i] + '|' + names[j],
                         label: names[i] + ' ↔ ' + names[j],
                     });
                 }
@@ -52,14 +52,16 @@ export default {
                 return null;
             }
             // normalize to the option ordering (lower winding index first)
-            const low = Math.min(pair[0], pair[1]);
-            const high = Math.max(pair[0], pair[1]);
-            return low + '|' + high;
+            const names = this.windingNames;
+            if (names.indexOf(pair[0]) > names.indexOf(pair[1])) {
+                return pair[1] + '|' + pair[0];
+            }
+            return pair[0] + '|' + pair[1];
         },
         addShield() {
             const designRequirements = this.masStore.mas.inputs.designRequirements;
             const firstPair = this.pairOptions[0];
-            const betweenWindings = firstPair ? firstPair.value.split('|').map(Number) : [];
+            const betweenWindings = firstPair ? firstPair.value.split('|') : [];
             designRequirements.shielding = [
                 ...(designRequirements.shielding || []),
                 {
@@ -81,7 +83,7 @@ export default {
             if (value == null) {
                 return;
             }
-            requirement.betweenWindings = value.split('|').map(Number);
+            requirement.betweenWindings = value.split('|');
         },
     }
 }

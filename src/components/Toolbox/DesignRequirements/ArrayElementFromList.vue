@@ -1,6 +1,6 @@
 <script setup>
 import { useMasStore } from '../../../stores/mas'
-import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from 'WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, getMultiplier, combinedStyle, combinedClass, renameWinding } from 'WebSharedComponents/assets/js/utils.js'
 import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 import { isolationSideOrdered } from 'WebSharedComponents/assets/js/defaults.js'
 </script>
@@ -122,7 +122,7 @@ export default {
         changeText(value, index) {
             if (value != '') {
                 this.errorMessages = '';
-                this.masStore.mas.magnetic.coil.functionalDescription[index].name = value;
+                renameWinding(this.masStore.mas, index, value);
             }
             else {
                 this.errorMessages = "Winding name cannot be empty";
