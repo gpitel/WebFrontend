@@ -67,6 +67,7 @@ export default {
                 {
                     name: 'Shield ' + ((designRequirements.shielding || []).length + 1),
                     betweenWindings,
+                    thickness: 0.0001,
                 },
             ];
         },
