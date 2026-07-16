@@ -41,6 +41,11 @@ const routes = [
         name: 'InsulationAdviser',
         component: () => import('../views/InsulationAdviser.vue')
     },
+    {
+        path: '/core_studio',
+        name: 'CoreStudio',
+        component: () => import('../views/CoreStudio.vue')
+    },
 
 
     {
@@ -110,6 +115,51 @@ const routes = [
         path: '/core_shape_cross_referencer',
         name: 'CoreShapeCrossReferencer',
         component: () => import('../views/CrossReferencers/CrossReferencer.vue')
+    },
+    {
+        path: '/designs',
+        name: 'MyDesigns',
+        component: () => import('../views/MyDesigns.vue')
+    },
+    {
+        path: '/account',
+        name: 'Account',
+        component: () => import('../views/Account.vue')
+    },
+    {
+        path: '/inventory',
+        name: 'MyInventory',
+        component: () => import('../views/MyInventory.vue')
+    },
+    {
+        path: '/share/d/:token',
+        name: 'SharedDesign',
+        component: () => import('../views/SharedDesign.vue')
+    },
+    {
+        path: '/share/i/:token',
+        name: 'SharedInventory',
+        component: () => import('../views/SharedInventory.vue')
+    },
+    {
+        path: '/orgs',
+        name: 'Organizations',
+        component: () => import('../views/Organizations.vue')
+    },
+    {
+        path: '/accept_invite',
+        name: 'AcceptInvite',
+        component: () => import('../views/AcceptInvite.vue')
+    },
+    {
+        path: '/verify_email',
+        name: 'VerifyEmail',
+        component: () => import('../views/EmailAction.vue')
+    },
+    {
+        path: '/reset_password',
+        name: 'ResetPassword',
+        component: () => import('../views/EmailAction.vue')
     },
     {
         // Catch-all: unknown paths render a blank page otherwise (vue-router
