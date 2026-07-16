@@ -10,6 +10,7 @@ import { waitForMkf, isWorkerMode } from 'WebSharedComponents/assets/js/mkfRunti
 import { waitForKirchhoff } from 'WebSharedComponents/assets/js/kirchhoffRuntime'
 import { Convert as MasConvert } from 'WebSharedComponents/assets/ts/MAS.ts'
 import { clean } from 'WebSharedComponents/assets/js/utils'
+import { useInventoryStore, ENGINE_HAS_CONTEXT_ADVISERS } from '../stores/inventory'
 
 // MAS sentry. Validates an outgoing payload against the generated MAS schema
 // (via quicktype's `Convert.to*`) before we hand it to the WASM. Loud failure
@@ -293,7 +294,27 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             }
 
             masSentry('calculateAdvisedCores', 'Inputs', inputs);
-            const result = await mkf.calculate_advised_cores(JSON.stringify(inputs), JSON.stringify(weights), count, modeString);
+            // Inventory scoping: with scope 'only', run against the account
+            // inventory through the engine's LibraryContext instead of the
+            // public catalog (the context is loaded on engine init /
+            // scope change by inventory.applyScope).
+            const inventoryStore = useInventoryStore();
+            let result;
+            if (inventoryStore.scope === 'only') {
+                if (!ENGINE_HAS_CONTEXT_ADVISERS) {
+                    throw new Error("Inventory-only advising needs the next engine update (gate in inventory.js)");
+                }
+                if (!inventoryStore.engineContextLoaded) {
+                    // Never advise from the full catalog while claiming 'only my
+                    // inventory' — if the context failed to load at engine init,
+                    // fail loudly instead.
+                    throw new Error("Adviser scope is 'only my inventory' but your inventory could not be loaded into the engine — sign in again or reload the page (see console for the original error).");
+                }
+                result = await mkf.calculate_advised_cores_with_context(
+                    JSON.stringify(inputs), JSON.stringify(weights), count, modeString, '{}', true);
+            } else {
+                result = await mkf.calculate_advised_cores(JSON.stringify(inputs), JSON.stringify(weights), count, modeString);
+            }
             if (result.startsWith('Exception')) {
                 setTimeout(() => { this.advisedCoresCalculated(false, result); }, this.task_standard_response_delay);
                 throw new Error(result);
@@ -390,7 +411,21 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             }
 
             masSentry('calculateAdvisedMagnetics', 'Inputs', inputs);
-            const result = await mkf.calculate_advised_magnetics(JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString);
+            // Inventory scoping — see calculateAdvisedCores.
+            const inventoryStore = useInventoryStore();
+            let result;
+            if (inventoryStore.scope === 'only') {
+                if (!ENGINE_HAS_CONTEXT_ADVISERS) {
+                    throw new Error("Inventory-only advising needs the next engine update (gate in inventory.js)");
+                }
+                if (!inventoryStore.engineContextLoaded) {
+                    throw new Error("Adviser scope is 'only my inventory' but your inventory could not be loaded into the engine — sign in again or reload the page (see console for the original error).");
+                }
+                result = await mkf.calculate_advised_magnetics_with_context(
+                    JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString, '{}', true);
+            } else {
+                result = await mkf.calculate_advised_magnetics(JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString);
+            }
             if (result.startsWith('Exception')) {
                 setTimeout(() => { this.advisedMagneticsCalculated(false, result); }, this.task_standard_response_delay);
                 throw new Error(result);
@@ -2265,6 +2300,111 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             const waveforms = JSON.parse(result);
             setTimeout(() => { this.dmcWaveformsSimulated(true, waveforms); }, this.task_standard_response_delay);
             return waveforms;
+        },
+
+        // ==========================================
+        // Core Studio (/core_studio) wrappers
+        // ==========================================
+
+        coreShapeFamiliesGotten(success = true, dataOrMessage = '') {
+        },
+
+        async getCoreShapeFamilies() {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const families = toArray(await mkf.get_available_core_shape_families());
+            setTimeout(() => { this.coreShapeFamiliesGotten(true, families); }, this.task_standard_response_delay);
+            return families;
+        },
+
+        coreShapesByFamilyGotten(success = true, dataOrMessage = '') {
+        },
+
+        async getCoreShapesByFamily(family) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const shapes = toArray(await mkf.get_available_core_shapes_by_family(family));
+            setTimeout(() => { this.coreShapesByFamilyGotten(true, shapes); }, this.task_standard_response_delay);
+            return shapes;
+        },
+
+        shapeDataGotten(success = true, dataOrMessage = '') {
+        },
+
+        async getShapeData(shapeName) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const shapeResult = await mkf.get_shape_data(shapeName);
+            if (shapeResult.startsWith('Exception')) {
+                setTimeout(() => { this.shapeDataGotten(false, shapeResult); }, this.task_standard_response_delay);
+                throw new Error(shapeResult);
+            }
+            const shape = JSON.parse(shapeResult);
+            setTimeout(() => { this.shapeDataGotten(true, shape); }, this.task_standard_response_delay);
+            return shape;
+        },
+
+        shapeFamilySubtypesGotten(success = true, dataOrMessage = '') {
+        },
+
+        async getShapeFamilySubtypes(family) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const subtypes = toArray(await mkf.get_shape_family_subtypes(family));
+            setTimeout(() => { this.shapeFamilySubtypesGotten(true, subtypes); }, this.task_standard_response_delay);
+            return subtypes;
+        },
+
+        shapeFamilyDimensionsGotten(success = true, dataOrMessage = '') {
+        },
+
+        async getShapeFamilyDimensions(family, subtype = '') {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const dimensions = toArray(await mkf.get_shape_family_dimensions(family, subtype));
+            setTimeout(() => { this.shapeFamilyDimensionsGotten(true, dimensions); }, this.task_standard_response_delay);
+            return dimensions;
+        },
+
+        coreMaterialManufacturersGotten(success = true, dataOrMessage = '') {
+        },
+
+        async getCoreMaterialsByManufacturer() {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const materialsPerManufacturer = {};
+            const manufacturers = toArray(await mkf.get_available_core_manufacturers()).sort();
+            for (const manufacturer of manufacturers) {
+                materialsPerManufacturer[manufacturer] = toArray(await mkf.get_available_core_materials(manufacturer));
+            }
+            setTimeout(() => { this.coreMaterialManufacturersGotten(true, materialsPerManufacturer); }, this.task_standard_response_delay);
+            return materialsPerManufacturer;
+        },
+
+        steinmetzCoefficientsCalculated(success = true, dataOrMessage = '') {
+        },
+
+        async calculateSteinmetzCoefficients(volumetricLossesPoints, frequencyRanges) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.calculate_steinmetz_coefficients(
+                JSON.stringify(volumetricLossesPoints),
+                JSON.stringify(frequencyRanges)
+            );
+            if (typeof result === 'string' && result.startsWith('Exception')) {
+                setTimeout(() => { this.steinmetzCoefficientsCalculated(false, result); }, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const coefficients = JSON.parse(result);
+            setTimeout(() => { this.steinmetzCoefficientsCalculated(true, coefficients); }, this.task_standard_response_delay);
+            return coefficients;
         },
 
         // ==========================================

@@ -13,6 +13,8 @@ import { useStateStore } from '/src/stores/state'
 import { initTelemetry } from 'WebSharedComponents/assets/js/telemetry.js'
 import { useStyleStore } from '/src/stores/style'
 import { useFairRiteStyleStore } from '/src/stores/fairRiteStyle'
+import { useCustomPartsStore } from '/src/stores/customParts'
+import { useInventoryStore } from '/src/stores/inventory'
 import { useModelSettingsStore } from '/MagneticBuilder/src/stores/modelSettings'
 import { VueWindowSizePlugin } from 'vue-window-size/plugin';
 import { initWorker } from 'WebSharedComponents/assets/js/mkfRuntime'
@@ -146,6 +148,23 @@ app.config.globalProperties.$userStore = useUserStore()
 app.config.globalProperties.$settingsStore = useSettingsStore()
 app.config.globalProperties.$stateStore = useStateStore()
 
+// Optional account session: ask the backend once per boot whether the session
+// cookie is still valid, and start settings sync while logged in. Everything
+// is fire-and-forget — anonymous use must never wait on the account service.
+import { useAuthStore } from '/src/stores/auth'
+import { startSettingsSync } from '/src/services/settingsSync'
+const _authStore = useAuthStore()
+_authStore.fetchMe().then(() => {
+    if (_authStore.isLoggedIn) {
+        startSettingsSync(app.config.globalProperties.$settingsStore)
+    }
+})
+_authStore.$subscribe(() => {
+    if (_authStore.isLoggedIn) {
+        startSettingsSync(app.config.globalProperties.$settingsStore)
+    }
+})
+
 // Tab-scoped telemetry session ID (resets on tab close; not tied to user identity)
 const _sid = sessionStorage.getItem('om_telemetry_sid') || crypto.randomUUID()
 sessionStorage.setItem('om_telemetry_sid', _sid)
@@ -159,6 +178,9 @@ initTelemetry({
     environment: import.meta.env.VITE_ENV || 'production',
     appVersion: import.meta.env.VITE_APP_VERSION || null,
     masProvider: () => (_masStore && _masStore.mas) || null,
+    // Privacy filter: designs referencing private inventory parts are
+    // recorded without their MAS payload (see telemetry.js).
+    privatePartNamesProvider: () => useInventoryStore().privatePartNames,
 })
 
 export const globals = app.config.globalProperties
@@ -188,6 +210,20 @@ function preloadMKF() {
                 mkf.load_core_shapes("").then(() => console.log("Preload: Core shapes loaded")),
                 mkf.load_wires("").then(() => console.log("Preload: Wires loaded"))
             ]);
+
+            // Re-inject the user's Core Studio parts (custom shapes/materials)
+            // on top of the catalog so they show up in every selector.
+            await useCustomPartsStore().reinject(mkf);
+
+            // Account inventory (Phase 2): bring the engine in line with the
+            // persisted adviser scope (merge-inject / LibraryContext). No-op
+            // for scope 'public' or when signed out; failures are loud but
+            // must not block the engine boot for anonymous use.
+            try {
+                await useInventoryStore().applyScope(mkf);
+            } catch (error) {
+                console.error('Inventory scope could not be applied:', error);
+            }
             
             // Initialize model settings from WASM during preload
             console.warn("Preload: Initializing model settings...");
@@ -340,7 +376,10 @@ router.beforeEach((to, from, next) => {
             preloadKirchhoff();
         }
         if (app.config.globalProperties.$mkf == null && to.name != "EngineLoader") {
-            app.config.globalProperties.$userStore.loadingPath = to.path
+            // fullPath, not path: emailed links (/reset_password?token=...,
+            // /accept_invite?id=..., share pages) must keep their query
+            // string across the engine-loader bounce.
+            app.config.globalProperties.$userStore.loadingPath = to.fullPath
             router.push(`${import.meta.env.BASE_URL}engine_loader`)
         }
         else if (app.config.globalProperties.$mkf == null && to.name == "EngineLoader") {
@@ -419,6 +458,18 @@ router.beforeEach((to, from, next) => {
                     // Wait for ALL loading to complete
                     if (loadPromises.length > 0) {
                         await Promise.all(loadPromises);
+                    }
+
+                    // Re-inject the user's Core Studio parts (custom shapes/
+                    // materials) on top of the catalog. The preload path does
+                    // this too; the loaders upsert by name so it's idempotent.
+                    await useCustomPartsStore().reinject(mkf);
+
+                    // Account inventory scope (idempotent, see preload path).
+                    try {
+                        await useInventoryStore().applyScope(mkf);
+                    } catch (error) {
+                        console.error('Inventory scope could not be applied:', error);
                     }
                     console.warn("All data loaded");
                     

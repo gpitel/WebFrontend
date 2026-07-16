@@ -2,10 +2,13 @@
 import { useMasStore } from '/MagneticBuilder/src/stores/mas'
 import { useHistoryStore } from '/MagneticBuilder/src/stores/history'
 import { useTaskQueueStore } from '../stores/taskQueue'
-import { combinedStyle, combinedClass, checkAndFixMas, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import { useAuthStore } from '../stores/auth'
+import { useCloudDesignStore } from '../stores/cloudDesign'
+import { loadMasIntoApp } from '../services/loadMasIntoApp'
 import { defineAsyncComponent } from "vue";
 import { useElementVisibility  } from '@vueuse/core'
 import { ref } from 'vue'
+import { startTourForContext } from '../tours'
 import '../assets/scss/custom.scss'
 </script>
 
@@ -18,13 +21,17 @@ export default {
     emits: ["toolSelected"],
     components: {
         BugReporterModal: defineAsyncComponent(() => import('/src/components/User/BugReporter.vue') ),
+        AccountModal: defineAsyncComponent(() => import('/src/components/User/AccountModal.vue') ),
     },
     data() {
         const masStore = useMasStore();
         const historyStore = useHistoryStore();
         const taskQueueStore = useTaskQueueStore();
+        const authStore = useAuthStore();
+        const cloudDesignStore = useCloudDesignStore();
         const loading = false;
         const bugReporterVisible = false;
+        const accountModalVisible = false;
         // Grouped wizard menu — keeps the header dropdown compact by hiding
         // each topology family behind a fly-out submenu. Keys (cy, store,
         // hoverKey, icon, label) match the prior flat menu 1:1 so existing
@@ -97,17 +104,34 @@ export default {
             masStore,
             historyStore,
             taskQueueStore,
+            authStore,
+            cloudDesignStore,
             loading,
             bugReporterVisible,
+            accountModalVisible,
+            savingToCloud: false,
             hoveredWizard: null,
             openWizardGroup: null,
             wizardGroups,
             navCollapseOpen: false,
             openDropdown: null,
+            helpPulse: localStorage.getItem('omHelpTourSeen') == null,
         }
     },
     methods: {
         toggleDropdown(key) { this.openDropdown = this.openDropdown === key ? null : key; },
+        async startHelpTour() {
+            localStorage.setItem('omHelpTourSeen', '1');
+            this.helpPulse = false;
+            this.openDropdown = null;
+            // On narrow screens the nav items live inside the hamburger menu;
+            // expand it so the tour can highlight them.
+            if (headerTogglerIsVisible.value) {
+                this.navCollapseOpen = true;
+                await this.$nextTick();
+            }
+            startTourForContext(this.$route.name, this.$stateStore);
+        },
         closeDropdowns() { this.openDropdown = null; this.navCollapseOpen = false; },
         async onNewPowerMagneticDesign() {
             this.$stateStore.resetMagneticTool();
@@ -172,7 +196,27 @@ export default {
                 await this.$router.push(`${import.meta.env.BASE_URL}engine_loader`);
             }
         },
+        async onCoreStudio() {
+            if (this.$route.name != 'CoreStudio')
+                await this.$router.push(`${import.meta.env.BASE_URL}core_studio`);
+        },
         async continueMagneticToolDesign() {
+            // ABT #161: restore a valid Magnetic-Tool workflow/tool before
+            // navigating. Flows like the Insulation Coordinator (and the
+            // Magnetic Viewer) leave selectedWorkflow pointing at a workflow
+            // that has no magneticBuilder tool. GenericTool then resolves
+            // getCurrentToolState() = toolboxStates[workflow][magneticBuilder]
+            // to undefined and renders a blank page. If the current workflow
+            // can host the magnetic builder, keep the user's in-progress
+            // context; otherwise fall back to the design workflow deterministically.
+            const workflow = this.$stateStore.selectedWorkflow;
+            const workflowState = this.$stateStore.toolboxStates[workflow];
+            if (!workflowState || !workflowState.magneticBuilder) {
+                this.$stateStore.selectWorkflow("design");
+            }
+            this.$stateStore.selectTool("magneticBuilder");
+
+            await this.$nextTick();
             if (this.$route.name != 'MagneticTool')
                 await this.$router.push(`${import.meta.env.BASE_URL}magnetic_tool`);
             else
@@ -189,90 +233,16 @@ export default {
                 const newMas = JSON.parse(e.target.result);
                 if (newMas.magnetic != null) {
                     try {
-                        const response = await checkAndFixMas(newMas, this.taskQueueStore);
-
-                        // Save coil processed data that masAutocomplete may strip
-                        const savedCoilData = {
-                            layersDescription: response.magnetic?.coil?.layersDescription,
-                            turnsDescription: response.magnetic?.coil?.turnsDescription,
-                            sectionsDescription: response.magnetic?.coil?.sectionsDescription,
-                        };
-
-                        // Always autocomplete the MAS to resolve wire/strand string names to
-                        // full objects and populate core processedDescription, bobbin, etc.
-                        let autocompletedMas = response;
-                        try {
-                            autocompletedMas = await this.taskQueueStore.masAutocomplete(response, false, {});
-                        } catch (autocompleteError) {
-                            console.warn('masAutocomplete failed, using checkAndFixMas result:', autocompleteError);
-                        }
-
-                        // Restore coil processed data if masAutocomplete stripped it
-                        if (autocompletedMas.magnetic?.coil) {
-                            if (!autocompletedMas.magnetic.coil.layersDescription && savedCoilData.layersDescription) {
-                                autocompletedMas.magnetic.coil.layersDescription = savedCoilData.layersDescription;
-                            }
-                            if (!autocompletedMas.magnetic.coil.turnsDescription && savedCoilData.turnsDescription) {
-                                autocompletedMas.magnetic.coil.turnsDescription = savedCoilData.turnsDescription;
-                            }
-                            if (!autocompletedMas.magnetic.coil.sectionsDescription && savedCoilData.sectionsDescription) {
-                                autocompletedMas.magnetic.coil.sectionsDescription = savedCoilData.sectionsDescription;
-                            }
-                        }
-
-                        this.masStore.resetMas();
-                        this.masStore.mas = autocompletedMas;
-                        this.masStore.importedMas();
-
-                        // Reset coil view to Basic mode when loading a new MAS file
-                        this.$stateStore.closeCoilAdvancedInfo();
-
-                        this.$stateStore.selectWorkflow("design");
-                        this.$stateStore.selectApplication(this.$stateStore.SupportedApplications.Power);
-                        this.$stateStore.selectTool("magneticBuilder");
-                        this.$stateStore.setCurrentToolSubsection("magneticBuilder");
-                        this.$stateStore.setCurrentToolSubsectionStatus("designRequirements", true);
-                        this.$stateStore.setCurrentToolSubsectionStatus("operatingPoints", true);
-                        this.$stateStore.operatingPoints.modePerPoint = [];
-                        for (let i = 0; i < this.masStore.mas.inputs.operatingPoints.length; i++) {
-                            const excitation = this.masStore.mas.inputs.operatingPoints[i].excitationsPerWinding[0];
-                            // Determine mode based on what data is present:
-                            // - HarmonicsList: has harmonics with multiple entries (DC + at least one harmonic)
-                            //   This means the user entered harmonics manually
-                            // - Manual: only has waveform/processed without meaningful harmonics
-                            const hasMultipleHarmonics = excitation.current?.harmonics?.amplitudes?.length > 1;
-
-                            if (hasMultipleHarmonics) {
-                                this.$stateStore.operatingPoints.modePerPoint.push(this.$stateStore.OperatingPointsMode.HarmonicsList);
-                            }
-                            else {
-                                this.$stateStore.operatingPoints.modePerPoint.push(this.$stateStore.OperatingPointsMode.Manual);
-                            }
-                        }
-                        this.$stateStore.setCurrentToolSubsectionStatus("designRequirements", true);
-                        this.$stateStore.setCurrentToolSubsectionStatus("operatingPoints", true);
-                        this.$stateStore.loadingDesign = true;
-
-                        if (this.$router.currentRoute.value.path != `${import.meta.env.BASE_URL}magnetic_tool`) {
-                            this.$userStore.loadingPath = `${import.meta.env.BASE_URL}magnetic_tool`;
-
-                            // Wait for pinia-plugin-persistedstate to write to localStorage
-                            await new Promise(resolve => {
-                                const unsubscribe = this.masStore.$subscribe(() => {
-                                    unsubscribe();
-                                    resolve();
-                                }, { flush: 'sync' });
-                                // Trigger a sync by touching the store
-                                this.masStore.$patch({});
-                            });
-
-                            await this.$router.push(`${import.meta.env.BASE_URL}engine_loader`);
-                        }
-                        else {
-                            this.masStore.mas.magnetic.core = autocompletedMas.magnetic.core;
-                            this.masStore.mas.magnetic.coil = autocompletedMas.magnetic.coil;
-                            this.masStore.mas.magnetic.coil.functionalDescription = autocompletedMas.magnetic.coil.functionalDescription;
-                        }
+                        // A file import is a new working design, not the linked cloud one.
+                        this.cloudDesignStore.unlink();
+                        await loadMasIntoApp(newMas, {
+                            masStore: this.masStore,
+                            stateStore: this.$stateStore,
+                            userStore: this.$userStore,
+                            taskQueueStore: this.taskQueueStore,
+                            router: this.$router,
+                            route: this.$router.currentRoute.value,
+                        });
                     } catch (error) {
                         console.error(error);
                     } finally {
@@ -284,8 +254,55 @@ export default {
             };
             fr.readAsText(this.$refs['masFileReader'].files.item(0), "ISO-8859-1");
         },
+        onLoggedIn() {
+            // Post-login hook: settings sync starts lazily from main.js watcher.
+        },
+        async signOut() {
+            try {
+                await this.authStore.logout();
+            } catch (error) {
+                console.error("Logout failed:", error);
+            }
+            this.cloudDesignStore.unlink();
+            this.openDropdown = null;
+        },
+        async saveCurrentDesignToCloud() {
+            // Quick-save from the header: updates the linked design, or sends
+            // the user to My Designs to name a new one.
+            if (!this.cloudDesignStore.isLinked) {
+                await this.$router.push(`${import.meta.env.BASE_URL}designs`);
+                return;
+            }
+            this.savingToCloud = true;
+            try {
+                await this.cloudDesignStore.save(this.masStore.mas, null);
+            } catch (error) {
+                if (error.response?.status === 409) {
+                    const current = error.response.data.detail.current_version;
+                    if (window.confirm(`This design was modified elsewhere (now at version ${current}). Overwrite it with your local copy?`)) {
+                        await this.cloudDesignStore.overwrite(this.masStore.mas);
+                    }
+                }
+                else {
+                    console.error("Cloud save failed:", error);
+                    window.alert("Could not save to your account: " + (error.response?.data?.detail || error.message));
+                }
+            } finally {
+                this.savingToCloud = false;
+            }
+        },
     },
     computed: {
+    },
+    watch: {
+        // Any navigation closes the header menus. The dropdown <li>s stop
+        // click propagation (@click.stop), so the document-level closer never
+        // sees a click INSIDE a menu — without this, choosing a wizard or tool
+        // from a dropdown left that menu open, overlaying the destination page.
+        $route() {
+            this.closeDropdowns();
+            this.openWizardGroup = null;
+        },
     },
     mounted() {
         this.$settingsStore.loadingGif = "/images/loading.gif";
@@ -307,9 +324,28 @@ export default {
 
         this._closeDropdownsBound = this.closeDropdowns.bind(this);
         document.addEventListener('click', this._closeDropdownsBound);
+
+        // The header is position:fixed, so page content clears it with a top
+        // offset. Its height is NOT constant: at ~1280px (and below the xl
+        // breakpoint) the nav wraps to two rows and grows to ~101px, while the
+        // offset assumed a fixed 60px — so the header covered the top of the
+        // page and swallowed clicks on the first row of controls (the Core
+        // Advise button; ABT #234). Publish the real height as
+        // --om-header-height so every offset tracks it instead of guessing.
+        const headerEl = document.getElementById('header_wrapper');
+        if (headerEl) {
+            const publishHeight = () => {
+                document.documentElement.style.setProperty(
+                    '--om-header-height', `${Math.ceil(headerEl.getBoundingClientRect().height)}px`);
+            };
+            publishHeight();
+            this._headerResizeObserver = new ResizeObserver(publishHeight);
+            this._headerResizeObserver.observe(headerEl);
+        }
     },
     beforeUnmount() {
         if (this._closeDropdownsBound) document.removeEventListener('click', this._closeDropdownsBound);
+        if (this._headerResizeObserver) this._headerResizeObserver.disconnect();
     }
 }
 </script>
@@ -388,6 +424,16 @@ export default {
                                 <i class="mr-2 pi pi-bolt-charge-fill"></i>{{'Insulation Coordinator'}}
                             </button>
                         </li>
+                        <li>
+                            <button
+                                data-cy="Header-core-studio-link"
+                                :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
+                                class="dropdown-item nav-link w-100 px-2"
+                                @click="onCoreStudio"
+                            >
+                                <i class="mr-2 pi pi-wrench"></i>{{'Core Studio'}}
+                            </button>
+                        </li>
                       </ul>
                     </li>
                     <li class="nav-item dropdown" @click.stop>
@@ -463,6 +509,104 @@ export default {
                     </li>
                 </ul>
                 <ul class="navbar-nav ms-auto text-center">
+                    <li v-if="!authStore.isLoggedIn" class="nav-item">
+                        <span class="nav-item">
+                            <button
+                                data-cy="Header-sign-in-button"
+                                :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
+                                class="btn nav-link om-signin-btn text-center"
+                                title="Optional account: cloud-saved designs"
+                                @click="accountModalVisible = true"
+                            >
+                                {{'Sign in '}}<i class="pi pi-user"></i>
+                            </button>
+                        </span>
+                    </li>
+                    <li v-else class="nav-item dropdown" @click.stop>
+                        <button
+                            data-cy="Header-account-menu-button"
+                            :class="headerTogglerIsVisible? 'w-100' : 'mx-1' "
+                            class="btn nav-link om-account-btn text-center dropdown-toggle"
+                            @click="toggleDropdown('account')"
+                        >
+                            <i class="pi pi-user mr-1"></i>{{ authStore.user.display_name }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" :class="{ show: openDropdown === 'account' }">
+                            <li v-if="$stateStore.isAnyDesignLoaded()">
+                                <button
+                                    data-cy="Header-save-design-button"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    :disabled="savingToCloud"
+                                    @click="saveCurrentDesignToCloud"
+                                >
+                                    <i class="mr-2 pi" :class="savingToCloud ? 'pi-refresh fa-spin' : 'pi-save'"></i>
+                                    {{ cloudDesignStore.isLinked ? `Save "${cloudDesignStore.name}"` : 'Save design to account' }}
+                                </button>
+                            </li>
+                            <li>
+                                <router-link
+                                    data-cy="Header-my-designs-link"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    to="/designs"
+                                    @click="openDropdown = null"
+                                >
+                                    <i class="mr-2 pi pi-cloud"></i>My designs
+                                </router-link>
+                            </li>
+                            <li>
+                                <router-link
+                                    data-cy="Header-my-inventory-link"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    to="/inventory"
+                                    @click="openDropdown = null"
+                                >
+                                    <i class="mr-2 pi pi-box"></i>My inventory
+                                </router-link>
+                            </li>
+                            <li>
+                                <router-link
+                                    data-cy="Header-orgs-link"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    to="/orgs"
+                                    @click="openDropdown = null"
+                                >
+                                    <i class="mr-2 pi pi-building"></i>Organizations
+                                </router-link>
+                            </li>
+                            <li>
+                                <router-link
+                                    data-cy="Header-account-link"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    to="/account"
+                                    @click="openDropdown = null"
+                                >
+                                    <i class="mr-2 pi pi-cog"></i>Account
+                                </router-link>
+                            </li>
+                            <li>
+                                <button
+                                    data-cy="Header-sign-out-button"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    @click="signOut"
+                                >
+                                    <i class="mr-2 pi pi-sign-out"></i>Sign out
+                                </button>
+                            </li>
+                        </ul>
+                    </li>
+                    <li class="nav-item">
+                        <span class="nav-item">
+                            <button
+                                data-cy="Header-help-tour-button"
+                                :class="[headerTogglerIsVisible? 'w-100' : 'mx-1', helpPulse? 'om-help-pulse' : '']"
+                                class="btn nav-link om-help-btn text-center"
+                                title="Interactive tour of this page"
+                                @click="startHelpTour"
+                            >
+                                {{headerTogglerIsVisible? 'Page tour' : 'Help'}} <i class="pi pi-question-circle"></i>
+                            </button>
+                        </span>
+                    </li>
                     <li class="nav-item">
                         <span class="nav-item">
                             <a
@@ -510,6 +654,7 @@ export default {
 
     <!-- Modal -->
     <BugReporterModal v-model:visible="bugReporterVisible"/>
+    <AccountModal v-model:visible="accountModalVisible" @logged-in="onLoggedIn"/>
 </template>
 
 <style>
@@ -727,6 +872,30 @@ export default {
         filter: none !important;
     }
 
+    .om-help-btn {
+        color: var(--p-primary) !important;
+        background: rgba(var(--p-primary-rgb), 0.08) !important;
+        border: 1px solid rgba(var(--p-primary-rgb), 0.35) !important;
+        border-radius: 10px !important;
+        transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s !important;
+    }
+    .om-help-btn:hover {
+        background: rgba(var(--p-primary-rgb), 0.18) !important;
+        border-color: rgba(var(--p-primary-rgb), 0.6) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 10px rgba(var(--p-primary-rgb), 0.2) !important;
+        filter: none !important;
+    }
+    /* One-time attention pulse for users who have never opened a tour. */
+    .om-help-pulse {
+        animation: om-help-pulse 2s ease-out infinite;
+    }
+    @keyframes om-help-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(var(--p-primary-rgb), 0.55); }
+        70% { box-shadow: 0 0 0 9px rgba(var(--p-primary-rgb), 0); }
+        100% { box-shadow: 0 0 0 0 rgba(var(--p-primary-rgb), 0); }
+    }
+
     .om-bug-btn {
         color: var(--p-danger) !important;
         background: rgba(var(--p-danger-rgb), 0.08) !important;
@@ -910,7 +1079,7 @@ export default {
     }
 
     .main {
-      margin-top: 60px;
+      margin-top: var(--om-header-height, 60px);
     }
     ::-webkit-scrollbar { height: 3px;}
     ::-webkit-scrollbar-button {  background-color: var(--p-light); }

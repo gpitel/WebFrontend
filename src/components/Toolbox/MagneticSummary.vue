@@ -36,6 +36,42 @@ export default {
         }
     },
     computed: {
+        // ABT #162: the datasheet/summary is only meaningful for a fully
+        // characterised design. Detect the required pieces explicitly so we can
+        // render a loud "design incomplete" state — instead of crashing in the
+        // mounted hook (reading magnetizingInductance off an undefined output)
+        // or silently rendering a blank datasheet full of "N/A".
+        // The magnetizing-inductance output moved from the legacy top level of
+        // outputs[] into outputs[].inductance (current MAS schema). Read the
+        // current path first; keep the legacy fallback for in-memory documents
+        // that predate the load-time migration.
+        magnetizingInductanceOutput() {
+            const outputs = this.mas?.outputs?.[0];
+            return outputs?.inductance?.magnetizingInductance?.magnetizingInductance
+                ?? outputs?.magnetizingInductance?.magnetizingInductance
+                ?? null;
+        },
+        missingRequirements() {
+            const missing = [];
+            const mas = this.mas;
+            if (mas == null) {
+                missing.push('the design (MAS) object');
+                return missing;
+            }
+            if (mas.inputs?.designRequirements == null) missing.push('design requirements');
+            if (mas.magnetic?.core?.functionalDescription == null) missing.push('a selected core');
+            if (mas.magnetic?.coil?.functionalDescription == null) missing.push('a wound coil');
+            const outputs = mas.outputs?.[0];
+            if (outputs == null) {
+                missing.push('computed outputs (magnetizing inductance, losses)');
+            } else if (this.magnetizingInductanceOutput == null) {
+                missing.push('magnetizing inductance');
+            }
+            return missing;
+        },
+        isDesignComplete() {
+            return this.missingRequirements.length === 0;
+        },
         partNumber() {
             return this.mas?.magnetic?.manufacturerInfo?.reference || 'Custom Design';
         },
@@ -74,8 +110,8 @@ export default {
             const params = [];
             const outputs = this.mas?.outputs?.[0];
 
-            if (outputs?.magnetizingInductance?.magnetizingInductance) {
-                const val = outputs.magnetizingInductance.magnetizingInductance.nominal || outputs.magnetizingInductance.magnetizingInductance;
+            if (this.magnetizingInductanceOutput != null) {
+                const val = this.magnetizingInductanceOutput.nominal || this.magnetizingInductanceOutput;
                 const aux = formatInductance(val);
                 params.push({ label: 'Inductance', value: removeTrailingZeroes(aux.label, 2), unit: aux.unit, icon: 'fa-infinity' });
             }
@@ -106,8 +142,8 @@ export default {
             const inputs = this.mas?.inputs?.operatingPoints?.[0];
             
             // Inductance
-            if (outputs?.magnetizingInductance?.magnetizingInductance) {
-                const val = outputs.magnetizingInductance.magnetizingInductance.nominal || outputs.magnetizingInductance.magnetizingInductance;
+            if (this.magnetizingInductanceOutput != null) {
+                const val = this.magnetizingInductanceOutput.nominal || this.magnetizingInductanceOutput;
                 const aux = formatInductance(val);
                 specs.push({
                     parameter: 'Magnetizing Inductance',
@@ -143,17 +179,21 @@ export default {
                 });
             }
             
-            // Leakage inductance (for transformers)
+            // Leakage inductance (for transformers). All values are referred to the
+            // primary winding (web bug report #134: a user compared the displayed value
+            // against a secondary-side measurement — off by the turns ratio squared).
             if (outputs?.leakageInductance?.leakageInductancePerWinding?.length > 0) {
-                const leak = outputs.leakageInductance.leakageInductancePerWinding[0];
-                const aux = formatInductance(leak.nominal || leak);
-                specs.push({
-                    parameter: 'Leakage Inductance',
-                    symbol: 'Llk',
-                    typ: removeTrailingZeroes(aux.label, 2),
-                    unit: aux.unit,
-                    conditions: 'Secondary shorted'
-                });
+                const leak = this.leakageForWinding(1);
+                if (leak != null) {
+                    const aux = formatInductance(leak.nominal || leak);
+                    specs.push({
+                        parameter: 'Leakage Inductance',
+                        symbol: 'Llk',
+                        typ: removeTrailingZeroes(aux.label, 2),
+                        unit: aux.unit,
+                        conditions: 'Referred to primary, secondary shorted'
+                    });
+                }
             }
             
             return specs;
@@ -540,7 +580,7 @@ export default {
             return windings.map((w, i) => {
                 const wLoss = outputs.windingLosses.windingLossesPerWinding[i];
                 const dcr = outputs.windingLosses.dcResistancePerWinding?.[i];
-                const leak = outputs.leakageInductance?.leakageInductancePerWinding?.[i - 1];
+                const leak = this.leakageForWinding(i);
                 
                 const ohmicLoss = wLoss?.ohmicLosses?.losses || 0;
                 const skinLoss = (wLoss?.skinEffectLosses?.lossesPerHarmonic || []).reduce((a, b) => a + b, 0);
@@ -633,6 +673,17 @@ export default {
         }
     },
     mounted() {
+        // ABT #162: never run computeTexts / recordDesign on a partial design.
+        // computeTexts dereferences mas.magnetic.core... and recordDesign would
+        // register a bogus "finished design". Fail loudly instead; the template
+        // renders an explicit "design incomplete" panel.
+        if (!this.isDesignComplete) {
+            console.error(
+                '[MagneticSummary] Cannot render summary — design is incomplete. Missing: '
+                + this.missingRequirements.join(', ')
+            );
+            return;
+        }
         this.computeTexts();
         this.renderSchematic();
     },
@@ -650,6 +701,19 @@ export default {
             this.$axios.post(`${base}/process_latex_svg`, tikz)
                 .then((response) => { this.schematicSvg = response.data; })
                 .catch(() => { this.schematicRendererOffline = true; });
+        },
+        // Per-winding leakage (referred to the primary) for winding index i, tolerating both
+        // producer shapes of outputs.leakageInductance.leakageInductancePerWinding:
+        // - current engine (winding-indexed, N entries, 0 at the primary slot)
+        // - legacy saved MAS (secondaries-only, N-1 entries)
+        // Returns null for the primary and when no value exists (web bug reports #125/#134/#139).
+        leakageForWinding(windingIndex) {
+            if (windingIndex === 0) return null;
+            const perWinding = this.mas?.outputs?.[0]?.leakageInductance?.leakageInductancePerWinding;
+            if (!perWinding?.length) return null;
+            const numberWindings = this.mas?.magnetic?.coil?.functionalDescription?.length || 0;
+            const isWindingIndexed = perWinding.length === numberWindings;
+            return perWinding[isWindingIndexed ? windingIndex : windingIndex - 1] ?? null;
         },
         plotModeChange(newMode) {
             this.plotMode = newMode;
@@ -710,7 +774,21 @@ export default {
 </script>
 
 <template>
-    <div class="datasheet-wrapper">
+    <!-- ABT #162: loud, explicit incomplete-design state. No silent blanks. -->
+    <div v-if="!isDesignComplete" class="datasheet-incomplete" :data-cy="dataTestLabel + '-incomplete'">
+        <i class="pi pi-exclamation-triangle datasheet-incomplete-icon"></i>
+        <h2 class="datasheet-incomplete-title">Design incomplete</h2>
+        <p class="datasheet-incomplete-text">
+            The summary cannot be generated yet — this design is still missing:
+        </p>
+        <ul class="datasheet-incomplete-list">
+            <li v-for="item in missingRequirements" :key="item">{{ item }}</li>
+        </ul>
+        <p class="datasheet-incomplete-text">
+            Go back and complete the earlier steps (requirements, core, coil, and run the adviser/simulation) before opening the summary.
+        </p>
+    </div>
+    <div v-else class="datasheet-wrapper">
         <!-- Exporters -->
         <CoreExporter :data-cy="dataTestLabel + '-CoreExporter'"/>
         <CoilExporter :data-cy="dataTestLabel + '-CoilExporter'" />
@@ -1016,7 +1094,7 @@ export default {
                                     <th>Winding</th>
                                     <th>DCR</th>
                                     <th>Loss</th>
-                                    <th>Leakage</th>
+                                    <th>Leakage (ref. primary)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1088,6 +1166,38 @@ export default {
     background: var(--p-dark);
     min-height: 100vh;
     padding: 15px;
+}
+
+/* ABT #162: incomplete-design panel */
+.datasheet-incomplete {
+    background: var(--p-dark);
+    min-height: 60vh;
+    padding: 40px 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--p-text-color, #eee);
+}
+.datasheet-incomplete-icon {
+    font-size: 3rem;
+    color: #e0a800;
+    margin-bottom: 12px;
+}
+.datasheet-incomplete-title {
+    margin: 0 0 8px 0;
+    font-weight: 600;
+}
+.datasheet-incomplete-text {
+    max-width: 520px;
+    opacity: 0.85;
+}
+.datasheet-incomplete-list {
+    text-align: left;
+    display: inline-block;
+    margin: 8px auto 16px auto;
+    color: #ffca6b;
 }
 
 .datasheet-toolbar {

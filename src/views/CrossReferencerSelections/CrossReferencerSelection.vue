@@ -1,5 +1,8 @@
 <script>
+import FloatingHelpButton from '../../components/FloatingHelpButton.vue'
+
 export default {
+    components: { FloatingHelpButton },
     props: {
         suffix: {
             type: String,
@@ -56,6 +59,7 @@ export default {
                 </div>
             </div>
         </main>
+        <FloatingHelpButton />
     </div>
 </template>
 
@@ -145,7 +149,7 @@ export default {
     }
 
     .main {
-      margin-top: 60px;
+      margin-top: var(--om-header-height, 60px);
     }
     ::-webkit-scrollbar { height: 3px;}
     ::-webkit-scrollbar-button {  background-color: var(--p-light); }
