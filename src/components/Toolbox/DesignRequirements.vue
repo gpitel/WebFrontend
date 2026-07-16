@@ -61,6 +61,7 @@ export default {
         connectionTypeLabels() {
             return {
                 blind: 'Blind',
+                chassis: 'Chassis',
                 flyingLead: 'Flying Lead',
                 pcbPad: 'PCB Pad',
                 pin: 'Pin',
