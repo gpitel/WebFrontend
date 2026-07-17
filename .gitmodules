@@ -1,6 +1,6 @@
 [submodule "WebSharedComponents"]
 	path = WebSharedComponents
-	url = git@github.com:OpenMagnetics/WebSharedComponents.git
+	url = ../WebSharedComponents.git
 [submodule "MagneticBuilder"]
 	path = MagneticBuilder
-	url = git@github.com:OpenMagnetics/MagneticBuilderApp.git
+	url = ../MagneticBuilderApp.git
