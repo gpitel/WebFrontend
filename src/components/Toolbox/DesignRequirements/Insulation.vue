@@ -3,9 +3,11 @@ import { toTitleCase, getMultiplier, combinedStyle, combinedClass } from 'WebSha
 import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithTolerance.vue'
 import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 import SeveralElementsFromList from 'WebSharedComponents/DataInput/SeveralElementsFromList.vue'
-import { minimumMaximumScalePerParameter} from 'WebSharedComponents/assets/js/defaults.js'
-import { CTI as Cti, IsolationClass, OvervoltageCategory, PollutionDegree, InsulationStandards } from 'WebSharedComponents/assets/ts/MAS.ts'
+import { minimumMaximumScalePerParameter, defaultInsulationSystemRequirement } from 'WebSharedComponents/assets/js/defaults.js'
+import { CTI as Cti, IsolationClass, OvervoltageCategory, PollutionDegree, InsulationStandards, TemperatureClassEnum, InsulationMaterialUse } from 'WebSharedComponents/assets/ts/MAS.ts'
 import * as Utils from 'WebSharedComponents/assets/js/utils.js'
+import Checkbox from 'primevue/checkbox'
+import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
 
 <script>
@@ -65,10 +67,38 @@ export default {
         },
     },
     data() {
+        const taskQueueStore = useTaskQueueStore();
         return {
+            taskQueueStore,
+            insulationMaterialNames: [],
         }
     },
     computed: {
+        insulationSystem() {
+            return this.modelValue['insulation']['insulationSystem'];
+        },
+        insulationSystemEnabled: {
+            get() {
+                return this.modelValue['insulation']['insulationSystem'] != null;
+            },
+            set(enabled) {
+                if (enabled) {
+                    this.modelValue['insulation']['insulationSystem'] = Utils.deepCopy(defaultInsulationSystemRequirement);
+                }
+                else {
+                    delete this.modelValue['insulation']['insulationSystem'];
+                }
+                this.$emit('update');
+            },
+        },
+        temperatureClassLabels() {
+            const celsiusPerLetter = { Y: 90, A: 105, E: 120, B: 130, F: 155, H: 180, N: 200, R: 220 };
+            const out = {};
+            Object.values(TemperatureClassEnum).forEach(v => {
+                out[v] = v in celsiusPerLetter ? `${v} (${celsiusPerLetter[v]} °C)` : `${v} °C`;
+            });
+            return out;
+        },
         ctiLabels() {
             return { groupI: 'Group I', groupII: 'Group II', groupIIIA: 'Group IIIA', groupIIIB: 'Group IIIB' };
         },
@@ -90,11 +120,53 @@ export default {
             return out;
         },
     },
-    watch: { 
+    watch: {
     },
     mounted () {
+        this.loadInsulationMaterialNames();
     },
     methods: {
+        loadInsulationMaterialNames() {
+            // Suggestions only — free text stays allowed for off-database
+            // materials (varnishes, bobbin stock, ...).
+            this.taskQueueStore.getAvailableInsulationMaterials()
+                .then((names) => { this.insulationMaterialNames = names; })
+                .catch(() => { this.insulationMaterialNames = []; });
+        },
+        setInsulationSystemText(field, value) {
+            if (value == '') {
+                delete this.modelValue['insulation']['insulationSystem'][field];
+            }
+            else {
+                this.modelValue['insulation']['insulationSystem'][field] = value;
+            }
+            this.$emit('update');
+        },
+        addAllowedMaterial() {
+            if (this.modelValue['insulation']['insulationSystem']['allowedMaterials'] == null) {
+                this.modelValue['insulation']['insulationSystem']['allowedMaterials'] = [];
+            }
+            this.modelValue['insulation']['insulationSystem']['allowedMaterials'].push({ name: '' });
+            this.$emit('update');
+        },
+        removeAllowedMaterial(index) {
+            this.modelValue['insulation']['insulationSystem']['allowedMaterials'].splice(index, 1);
+            if (this.modelValue['insulation']['insulationSystem']['allowedMaterials'].length == 0) {
+                delete this.modelValue['insulation']['insulationSystem']['allowedMaterials'];
+            }
+            this.$emit('update');
+        },
+        setAllowedMaterialName(index, value) {
+            this.modelValue['insulation']['insulationSystem']['allowedMaterials'][index]['name'] = value;
+            this.$emit('update');
+        },
+        cleanEmptyUses(material) {
+            // uses has schema minItems 1 — an unchecked-everything row must drop the key
+            if (material['uses'] != null && material['uses'].length == 0) {
+                delete material['uses'];
+            }
+            this.$emit('update');
+        },
     }
 }
 </script>
@@ -264,6 +336,130 @@ export default {
                     :textColor="textColor"
                     @update="$emit('update')"
                 />
+            </div>
+        </div>
+
+        <!-- Section 4: Certified insulation system (EIS), e.g. UL 1446 -->
+        <div class="ins-section">
+            <div class="ins-section-header">
+                <i class="pi pi-id-card"></i>
+                <span>Insulation System</span>
+                <div class="ins-eis-toggle">
+                    <Checkbox
+                        :data-cy="dataTestLabel + '-InsulationSystem-enable'"
+                        inputId="insulation-system-enable"
+                        binary
+                        v-model="insulationSystemEnabled"
+                    />
+                    <label for="insulation-system-enable">Required</label>
+                </div>
+            </div>
+            <div v-if="insulationSystem != null" class="ins-eis-body">
+                <div class="ins-grid-2">
+                    <div class="ins-cell">
+                        <ElementFromList
+                            :dataTestLabel="dataTestLabel + '-TemperatureClass'"
+                            :name="'temperatureClass'"
+                            :titleSameRow="true"
+                            :justifyContent="true"
+                            v-model="modelValue['insulation']['insulationSystem']"
+                            :options="Object.values(TemperatureClassEnum)"
+                            :optionLabels="temperatureClassLabels"
+                            :labelWidthProportionClass="'col-6'"
+                            :selectStyleClass="'col-6'"
+                            :labelFontSize='valueFontSize'
+                            :valueFontSize="valueFontSize"
+                            :labelBgColor="labelBgColor"
+                            :valueBgColor="valueBgColor"
+                            :textColor="textColor"
+                            @update="$emit('update')"
+                        />
+                    </div>
+                    <div class="ins-cell ins-eis-text">
+                        <label>Name</label>
+                        <input
+                            :data-cy="dataTestLabel + '-InsulationSystem-name'"
+                            type="text"
+                            placeholder="e.g. QT-180T"
+                            :value="insulationSystem['name']"
+                            @change="setInsulationSystemText('name', $event.target.value)"
+                        >
+                    </div>
+                    <div class="ins-cell ins-eis-text">
+                        <label>Certificate</label>
+                        <input
+                            :data-cy="dataTestLabel + '-InsulationSystem-certificate'"
+                            type="text"
+                            placeholder="e.g. UL E65007"
+                            :value="insulationSystem['certificate']"
+                            @change="setInsulationSystemText('certificate', $event.target.value)"
+                        >
+                    </div>
+                    <div class="ins-cell ins-eis-text">
+                        <label>Certified by</label>
+                        <input
+                            :data-cy="dataTestLabel + '-InsulationSystem-certifyingOrganization'"
+                            type="text"
+                            placeholder="e.g. UL"
+                            :value="insulationSystem['certifyingOrganization']"
+                            @change="setInsulationSystemText('certifyingOrganization', $event.target.value)"
+                        >
+                    </div>
+                </div>
+
+                <div class="ins-eis-materials">
+                    <div class="ins-eis-materials-header">
+                        <span>Approved materials</span>
+                        <button
+                            :data-cy="dataTestLabel + '-InsulationSystem-addMaterial'"
+                            type="button"
+                            class="ins-eis-add"
+                            @click="addAllowedMaterial"
+                        >
+                            <i class="pi pi-plus"></i> Add material
+                        </button>
+                    </div>
+                    <div
+                        v-for="(material, materialIndex) in insulationSystem['allowedMaterials']"
+                        :key="materialIndex"
+                        class="ins-eis-material-row"
+                    >
+                        <input
+                            :data-cy="dataTestLabel + '-InsulationSystem-material-' + materialIndex + '-name'"
+                            type="text"
+                            class="ins-eis-material-name"
+                            placeholder="Material name, e.g. Nomex 410"
+                            list="ins-eis-material-names"
+                            :value="material['name']"
+                            @change="setAllowedMaterialName(materialIndex, $event.target.value)"
+                        >
+                        <button
+                            :data-cy="dataTestLabel + '-InsulationSystem-material-' + materialIndex + '-remove'"
+                            type="button"
+                            class="ins-eis-remove"
+                            @click="removeAllowedMaterial(materialIndex)"
+                        >
+                            <i class="pi pi-times"></i>
+                        </button>
+                        <div class="ins-eis-material-uses">
+                            <SeveralElementsFromList
+                                :dataTestLabel="dataTestLabel + '-InsulationSystem-material-' + materialIndex + '-uses'"
+                                :name="'uses'"
+                                v-model="insulationSystem['allowedMaterials'][materialIndex]"
+                                :options="Object.values(InsulationMaterialUse)"
+                                :labelFontSize='valueFontSize'
+                                :valueFontSize="valueFontSize"
+                                :labelBgColor="labelBgColor"
+                                :valueBgColor="valueBgColor"
+                                :textColor="textColor"
+                                @update="cleanEmptyUses(material)"
+                            />
+                        </div>
+                    </div>
+                    <datalist id="ins-eis-material-names">
+                        <option v-for="materialName in insulationMaterialNames" :key="materialName" :value="materialName"></option>
+                    </datalist>
+                </div>
             </div>
         </div>
     </div>
