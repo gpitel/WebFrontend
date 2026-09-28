@@ -9,12 +9,14 @@ import { defaultOperatingPointExcitation, defaultPrecision, defaultSinusoidalNum
 import { tooltipsMagneticSynthesisOperatingPoints } from 'WebSharedComponents/assets/js/texts.js'
 
 import Text from 'WebSharedComponents/DataInput/Text.vue'
+import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
 
 
 </script>
 <script>
 
 export default {
+    components: { ElementFromList },
     emits: ["canContinue", "changeTool"],
     props: {
         dataTestLabel: {
@@ -48,6 +50,8 @@ export default {
         const localData = {
             ambientTemperature: 25
         };
+        // Per-operating-point view model for the cooling control (web bug report #170).
+        const coolingUi = [];
 
         this.$stateStore.initializeOperatingPoints();
 
@@ -61,6 +65,7 @@ export default {
             errorMessages,
             blockingRebounds,
             localData,
+            coolingUi,
         }
     },
     computed: {
@@ -101,13 +106,39 @@ export default {
                         this.errorMessages += "Missing waveforms for winding " + this.masStore.mas.magnetic.coil.functionalDescription[windingIndex].name + " in operating point " + this.masStore.mas.inputs.operatingPoints[operatingPointIndex].name + ".\n"
                         allSet = false;
                     }
+                    else if (exc.current.processed?.rms == null) {
+                        // Every winding is SEEDED with a default excitation at
+                        // initialization, so the structural checks above pass
+                        // without the user ever looking at the winding. Actually
+                        // opening a winding's editor runs the MKF processing that
+                        // fills processed.rms — the same signal the winding
+                        // buttons use for their processed/unprocessed color.
+                        // Without it, Continue would silently design against a
+                        // default waveform nobody entered.
+                        this.errorMessages += "Waveforms for winding " + this.masStore.mas.magnetic.coil.functionalDescription[windingIndex].name + " in operating point " + this.masStore.mas.inputs.operatingPoints[operatingPointIndex].name + " have not been defined yet: open the winding to review or edit them.\n"
+                        allSet = false;
+                    }
                 }
             }
             return allSet;
         }
     },
     created () {
-
+        this.ensureCoolingUi();
+    },
+    watch: {
+        // Operating points can be added or removed after mount; keep the cooling view
+        // models aligned with them (web bug report #170).
+        'masStore.mas.inputs.operatingPoints.length'() {
+            this.ensureCoolingUi();
+        },
+        // The gate depends on fields (e.g. processed.rms) that are filled by
+        // direct store mutations, not store actions — the $onAction re-emit in
+        // mounted() never fires for those. Watching the computed keeps the
+        // Continue button in sync the moment a winding becomes processed.
+        canContinue(value) {
+            this.emitCanContinue();
+        },
     },
     mounted () {
 
@@ -119,7 +150,7 @@ export default {
                 this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].voltage.processed = deepCopy(defaultOperatingPointExcitation.voltage.processed)
             }
         }
-        this.$emit("canContinue", this.canContinue);
+        this.emitCanContinue();
 
         // Only set default mode if no mode is currently selected
         // Don't reset user-selected modes when navigating back from magnetic builder
@@ -145,10 +176,75 @@ export default {
                 const signalDescriptor = action.args[0];
             }
 
-            this.$emit("canContinue", this.canContinue);
+            this.emitCanContinue();
         })
     },
     methods: {
+        // Web bug report #170: "How to add a forced air condition". The answer was: you
+        // could not. MAS carries conditions.cooling and MKF's Temperature model reads it
+        // (CoolingUtils::detectCoolingType -> FORCED_CONVECTION on velocity, HEATSINK on
+        // thermalResistance, COLD_PLATE on maximumTemperature), but nothing in the app
+        // ever wrote it -- MagneticSummary only DISPLAYED it, so the field could only
+        // arrive by hand-editing a MAS file.
+        //
+        // Natural convection deliberately stores null rather than an object: that is what
+        // every existing design has, and writing {temperature: ...} for it would change
+        // the thermal result for people who never asked for cooling.
+        coolingModeOf(operatingPointIndex) {
+            const cooling = this.masStore.mas.inputs.operatingPoints[operatingPointIndex]?.conditions?.cooling;
+            if (cooling == null) return 'Natural convection';
+            if (Array.isArray(cooling.velocity) && cooling.velocity.length > 0) return 'Forced air';
+            if (cooling.thermalResistance != null) return 'Heatsink';
+            return 'Natural convection';
+        },
+        // v-model needs a member expression, so the per-point view models live in the
+        // coolingUi array and are (re)built whenever the operating points change, rather
+        // than lazily from the template.
+        ensureCoolingUi() {
+            const operatingPoints = this.masStore.mas.inputs.operatingPoints ?? [];
+            this.coolingUi.length = operatingPoints.length;
+            operatingPoints.forEach((operatingPoint, operatingPointIndex) => {
+                if (this.coolingUi[operatingPointIndex] != null) return;
+                const cooling = operatingPoint?.conditions?.cooling;
+                this.coolingUi[operatingPointIndex] = {
+                    coolingMode: this.coolingModeOf(operatingPointIndex),
+                    airVelocity: (Array.isArray(cooling?.velocity) && cooling.velocity.length > 0) ? cooling.velocity[0] : 2,
+                    thermalResistance: cooling?.thermalResistance != null ? cooling.thermalResistance : 10,
+                };
+            });
+        },
+        updateCooling(operatingPointIndex) {
+            const ui = this.coolingUi[operatingPointIndex];
+            if (ui == null) return;
+            const conditions = this.masStore.mas.inputs.operatingPoints[operatingPointIndex].conditions;
+            if (ui.coolingMode == 'Forced air') {
+                conditions.cooling = {
+                    fluid: 'air',
+                    temperature: conditions.ambientTemperature,
+                    velocity: [ui.airVelocity],
+                };
+            }
+            else if (ui.coolingMode == 'Heatsink') {
+                conditions.cooling = { thermalResistance: ui.thermalResistance };
+            }
+            else {
+                conditions.cooling = null;
+            }
+            this.masStore.updatedInputExcitationProcessed();
+        },
+
+        // canContinue already builds errorMessages naming the exact operating
+        // point and winding that is incomplete — that text was computed on
+        // every evaluation and then dropped on the floor, which is why the
+        // button could only say "Fix Errors". Ship the reasons with the
+        // verdict so the sidebar can list them.
+        emitCanContinue() {
+            const canContinue = this.canContinue;
+            const errors = canContinue
+                ? []
+                : this.errorMessages.split('\n').map(line => line.trim()).filter(line => line != '');
+            this.$emit("canContinue", canContinue, errors);
+        },
         async updatedSignal(signalDescriptor) {
             if (!this.blockingRebounds) {
                 this.blockingRebounds = true;
@@ -217,25 +313,29 @@ export default {
         addNewOperatingPoint() {
             this.$stateStore.addNewOperatingPoint(this.currentOperatingPointIndex, this.$stateStore.operatingPoints.modePerPoint[this.currentOperatingPointIndex]);
 
-            this.currentOperatingPointIndex += 1;
+            // The store PUSHES the new operating point at the END of the list;
+            // `+= 1` only pointed at it when the current point was the last
+            // one, otherwise the mode below clobbered a neighbour's mode and
+            // the new point was left without one (ABT #345).
+            this.currentOperatingPointIndex = this.masStore.mas.inputs.operatingPoints.length - 1;
             this.$stateStore.operatingPoints.modePerPoint[this.currentOperatingPointIndex] = this.defaultMode;
-            this.$emit("canContinue", this.canContinue);
+            this.emitCanContinue();
         },
         removePoint(index) {
             if (index < this.currentOperatingPointIndex) {
                 this.currentOperatingPointIndex -= 1;
             }
             this.$stateStore.removeOperatingPoint(index);
-            this.$emit("canContinue", this.canContinue);
+            this.emitCanContinue();
         },
         importedWaveform() {
-            this.$emit("canContinue", this.canContinue);
+            this.emitCanContinue();
         },
         selectedManualOrImported() {
             setTimeout(() => {
                 this.masStore.updatedInputExcitationWaveformUpdatedFromProcessed('current');
             }, 100);
-            this.$emit("canContinue", this.canContinue);
+            this.emitCanContinue();
         },
         changeWinding(windingIndex) {
 
@@ -249,12 +349,12 @@ export default {
             setTimeout(() => {
                 this.masStore.updatedInputExcitationWaveformUpdatedFromProcessed('current');
             }, 100);
-            this.$emit("canContinue", this.canContinue);
+            this.emitCanContinue();
         },
         async reflectWinding(windingIndexToBeReflected){
             try {
                 // Reflection only allowed with two windings
-                var turnRatio = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.turnsRatios[0]);  
+                var turnRatio = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.turnsRatios[0], 'the turns ratio in Design Requirements');  
                 if (windingIndexToBeReflected == 0) {
                     var primaryExcitation = await this.taskQueueStore.calculateReflectedPrimary(this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[1], turnRatio);
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[0] = primaryExcitation;
@@ -263,7 +363,7 @@ export default {
                     var secondaryExcitation = await this.taskQueueStore.calculateReflectedSecondary(this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[0], turnRatio);
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[1] = secondaryExcitation;
                 }
-                this.$emit("canContinue", this.canContinue);
+                this.emitCanContinue();
             } catch (error) {
                 console.error(error);
             }
@@ -327,6 +427,66 @@ export default {
                             :max="minimumMaximumScalePerParameter['temperature']['max']"
                             :defaultValue="25"
                             v-model="masStore.mas.inputs.operatingPoints[operatingPointIndex].conditions"
+                            :labelWidthProportionClass="'col-12 md:col-3'"
+                            :valueWidthProportionClass="'col-12 md:col-9'"
+                            :valueFontSize="$styleStore.operatingPoints.inputFontSize"
+                            :labelFontSize="$styleStore.operatingPoints.inputFontSize"
+                            :labelBgColor="$styleStore.operatingPoints.operatingPointBgColor"
+                            :valueBgColor="$styleStore.operatingPoints.inputValueBgColor"
+                            :textColor="$styleStore.operatingPoints.inputTextColor"
+                        />
+                        <!-- Web bug report #170: "How to add a forced air condition".
+                             MAS and MKF have supported cooling all along; the app just had
+                             no way to set it. Natural convection leaves conditions.cooling
+                             null so nothing changes for designs that never touch this. -->
+                        <ElementFromList class="op-cooling px-0"
+                            v-if="coolingUi[operatingPointIndex]"
+                            :name="'coolingMode'"
+                            :tooltip="tooltipsMagneticSynthesisOperatingPoints['coolingMode']"
+                            :replaceTitle="'Cooling'"
+                            :options="['Natural convection', 'Forced air', 'Heatsink']"
+                            :dataTestLabel="dataTestLabel + '-ConditionsCooling'"
+                            v-model="coolingUi[operatingPointIndex]"
+                            @update="updateCooling(operatingPointIndex)"
+                            :labelWidthProportionClass="'col-12 md:col-3'"
+                            :valueFontSize="$styleStore.operatingPoints.inputFontSize"
+                            :labelFontSize="$styleStore.operatingPoints.inputFontSize"
+                            :labelBgColor="$styleStore.operatingPoints.operatingPointBgColor"
+                            :valueBgColor="$styleStore.operatingPoints.inputValueBgColor"
+                            :textColor="$styleStore.operatingPoints.inputTextColor"
+                        />
+                        <Dimension class="op-cooling px-0"
+                            v-if="coolingUi[operatingPointIndex] && coolingUi[operatingPointIndex].coolingMode == 'Forced air'"
+                            :name="'airVelocity'"
+                            :tooltip="tooltipsMagneticSynthesisOperatingPoints['airVelocity']"
+                            :replaceTitle="'Air speed'"
+                            unit="m/s"
+                            :dataTestLabel="dataTestLabel + '-ConditionsAirVelocity'"
+                            :min="0.1"
+                            :max="50"
+                            :defaultValue="2"
+                            v-model="coolingUi[operatingPointIndex]"
+                            @update="updateCooling(operatingPointIndex)"
+                            :labelWidthProportionClass="'col-12 md:col-3'"
+                            :valueWidthProportionClass="'col-12 md:col-9'"
+                            :valueFontSize="$styleStore.operatingPoints.inputFontSize"
+                            :labelFontSize="$styleStore.operatingPoints.inputFontSize"
+                            :labelBgColor="$styleStore.operatingPoints.operatingPointBgColor"
+                            :valueBgColor="$styleStore.operatingPoints.inputValueBgColor"
+                            :textColor="$styleStore.operatingPoints.inputTextColor"
+                        />
+                        <Dimension class="op-cooling px-0"
+                            v-if="coolingUi[operatingPointIndex] && coolingUi[operatingPointIndex].coolingMode == 'Heatsink'"
+                            :name="'thermalResistance'"
+                            :tooltip="tooltipsMagneticSynthesisOperatingPoints['thermalResistance']"
+                            :replaceTitle="'Heatsink Rth'"
+                            unit="K/W"
+                            :dataTestLabel="dataTestLabel + '-ConditionsHeatsinkRth'"
+                            :min="0.01"
+                            :max="1000"
+                            :defaultValue="10"
+                            v-model="coolingUi[operatingPointIndex]"
+                            @update="updateCooling(operatingPointIndex)"
                             :labelWidthProportionClass="'col-12 md:col-3'"
                             :valueWidthProportionClass="'col-12 md:col-9'"
                             :valueFontSize="$styleStore.operatingPoints.inputFontSize"

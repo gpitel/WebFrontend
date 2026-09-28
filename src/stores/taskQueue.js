@@ -5,11 +5,14 @@ import { waitForMkf, isWorkerMode } from 'WebSharedComponents/assets/js/mkfRunti
 // NOT the magnetics module. Its proxy accepts the legacy per-topology function names
 // (calculate_<topo>_inputs / simulate_<topo>_ideal_waveforms / generate_<topo>_ngspice_circuit) and
 // reshapes webKirchhoff's process_converter/design_tas output back to the legacy contract — see
-// kirchhoffRuntime.js. Magnetics methods (extract_operating_point, calculate_advised_*, mas_autocomplete,
-// load_*, current transformer / CMC / DMC below) stay on webMKF via waitForMkf().
+// kirchhoffRuntime.js. The current transformer, CMC and DMC methods below also run on webKirchhoff
+// (waitForKirchhoff): their requirement synthesis and ngspice decks live in Kirchhoff, not MKF.
+// Magnetics methods (extract_operating_point, calculate_advised_*, mas_autocomplete, load_*) stay on
+// webMKF via waitForMkf().
 import { waitForKirchhoff } from 'WebSharedComponents/assets/js/kirchhoffRuntime'
-import { Convert as MasConvert } from 'WebSharedComponents/assets/ts/MAS.ts'
+import { assertValidMas } from 'WebSharedComponents/assets/js/masValidator.js'
 import { clean } from 'WebSharedComponents/assets/js/utils'
+import { unitSystem } from 'WebSharedComponents/assets/js/units.js'
 import { useInventoryStore, ENGINE_HAS_CONTEXT_ADVISERS } from '../stores/inventory'
 
 // MAS sentry. Validates an outgoing payload against the generated MAS schema
@@ -24,10 +27,6 @@ import { useInventoryStore, ENGINE_HAS_CONTEXT_ADVISERS } from '../stores/invent
 // We never silently downgrade — on failure we throw with the full quicktype
 // error message (which includes the offending field path).
 function masSentry(where, kind, obj) {
-    const fn = MasConvert['to' + kind];
-    if (typeof fn !== 'function') {
-        throw new Error(`[MAS sentry @ ${where}] Unknown sentry kind "${kind}" (no Convert.to${kind} in MAS.ts)`);
-    }
     // Sentry-local cleaner. Recursively strips keys whose value is `null`,
     // `"null"`, or `undefined` from objects (not arrays). Quicktype's optional
     // fields are decoded as `u(undefined, ...)` and reject explicit `null`.
@@ -52,7 +51,9 @@ function masSentry(where, kind, obj) {
     }
     try {
         const cleaned = stripNulls(JSON.parse(JSON.stringify(obj)));
-        fn(JSON.stringify(cleaned));
+        // The real MAS JSON Schema (ABT #1388), not only quicktype's type check:
+        // bounds, patterns, const and oneOf included.
+        assertValidMas(kind, cleaned, where);
     } catch (e) {
         const cleaned = stripNulls(JSON.parse(JSON.stringify(obj)));
         const dr = cleaned?.inputs?.designRequirements ?? cleaned?.designRequirements ?? cleaned;
@@ -206,6 +207,23 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         settingsSet(success = true, dataOrMessage = '') {
         },
 
+        /**
+         * The wire standard follows the profile unit system (ABT #1110): IEC 60317
+         * under SI, NEMA MW 1000 C under imperial. The magnetic and core advisers
+         * wind their candidates with MKF's coil adviser, which only offers wires of
+         * the engine's preferred standard, so it is pushed before every advise.
+         */
+        async applyPreferredWireStandard(mkf) {
+            const settings = JSON.parse(await mkf.get_settings());
+            if (!('preferredWireStandard' in settings)) {
+                throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
+            }
+            const wanted = unitSystem() === 'imperial' ? 'NEMA MW 1000 C' : 'IEC 60317';
+            if (settings.preferredWireStandard === wanted) return;
+            settings.preferredWireStandard = wanted;
+            await mkf.set_settings(JSON.stringify(settings));
+        },
+
         async setSettings(settings) {
             const mkf = await waitForMkf();
             await mkf.ready;
@@ -225,6 +243,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         async calculateAdvisedCores(inputs, weights, count, mode) {
             const mkf = await waitForMkf();
             await mkf.ready;
+            await this.applyPreferredWireStandard(mkf);
 
             // Deep-clone so sanitization below never mutates the caller's MAS store
             inputs = JSON.parse(JSON.stringify(inputs));
@@ -330,6 +349,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         async calculateAdvisedMagnetics(inputs, weights, count, mode) {
             const mkf = await waitForMkf();
             await mkf.ready;
+            await this.applyPreferredWireStandard(mkf);
 
             // Deep-clone so sanitization below never mutates the caller's MAS store
             inputs = JSON.parse(JSON.stringify(inputs));
@@ -654,11 +674,43 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         dimensionResolved(success = true, dataOrMessage = '') {
         },
 
-        async resolveDimensionWithTolerance(dimension) {
+        async resolveDimensionWithTolerance(dimension, fieldName = 'value') {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const result = await mkf.resolve_dimension_with_tolerance(JSON.stringify(dimension));
+            // Web bug report #171: "I struggle to use the waveform import. No matter how the
+            // file is formatted, it always gives 'bad_optional_access'."
+            //
+            // That string is a raw std::bad_optional_access escaping the engine. Unlike every
+            // binding around it, resolve_dimension_with_tolerance has no try/catch in
+            // WebLibMKF (it returns a double, so it cannot answer with an "ERROR:" string),
+            // so the C++ throw arrives in JS as an opaque WebAssembly.Exception whose message
+            // is the exception's type name. resolve_dimensional_values() throws that way ON
+            // PURPOSE when a dimensionWithTolerance carries no nominal, minimum or maximum --
+            // it refuses to invent a number, which is right -- but the user was shown the
+            // C++ type name instead of which field they had left blank.
+            //
+            // Check it here, where we know what the field IS, and say so.
+            const hasValue = dimension != null && typeof dimension === 'object' &&
+                [dimension.nominal, dimension.minimum, dimension.maximum].some(v => typeof v === 'number' && Number.isFinite(v));
+            if (!hasValue) {
+                const reason = `No value for ${fieldName}: it has no nominal, minimum or maximum. Set it before continuing.`;
+                setTimeout(() => { this.dimensionResolved(false, reason); }, this.task_standard_response_delay);
+                throw new Error(reason);
+            }
+
+            let result;
+            try {
+                result = await mkf.resolve_dimension_with_tolerance(JSON.stringify(dimension));
+            }
+            catch (error) {
+                // Anything still coming out of the engine here is a genuine engine fault, not a
+                // blank field. Name the field anyway so the message is actionable.
+                const detail = error?.message ?? String(error);
+                const reason = `Could not read ${fieldName} (${detail}).`;
+                setTimeout(() => { this.dimensionResolved(false, reason); }, this.task_standard_response_delay);
+                throw new Error(reason);
+            }
             setTimeout(() => { this.dimensionResolved(true, result); }, this.task_standard_response_delay);
             return result;
         },
@@ -1596,6 +1648,44 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         },
 
         // ==========================================
+        // Converter-node waveforms (per-component overlays)
+        // ==========================================
+
+        componentWaveformsCalculated(success = true, dataOrMessage = '') {
+        },
+
+        /**
+         * Per-component time-domain waveforms (switch V_DS, diode current, cap ripple, …) for an
+         * assembled TAS — Kirchhoff's `component_waveforms`, SPEC §6.5. This is a SECOND full ngspice
+         * run over the deck, so it is NOT part of the Simulated click: the wizard calls it lazily the
+         * first time the user opens the converter view, using the `__converterTas` that
+         * simulate_<topo>_ideal_waveforms carried on its result.
+         * @param {Object} tas assembled TAS document from the simulation result
+         * @returns {Promise<Object>} {engine, referencePeriod, components:[…]}
+         */
+        async getComponentWaveforms(tas) {
+            if (!tas) throw new Error('getComponentWaveforms: no TAS to simulate (run Simulated first)');
+            const mkf = await waitForKirchhoff();
+            await mkf.ready;
+
+            const result = await mkf.component_waveforms(JSON.stringify(tas), '{"origin":"REQUIREMENTS"}');
+            if (typeof result === 'string' && result.startsWith('Exception')) {
+                setTimeout(() => { this.componentWaveformsCalculated(false, result); }, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const parsed = JSON.parse(result);
+            // KH returns {"success":false,…} when it was built without libngspice — surface it, never
+            // fall back to an empty overlay that would read as "this converter has no components".
+            if (parsed.success === false) {
+                const message = parsed.error || 'component_waveforms failed in webKirchhoff';
+                setTimeout(() => { this.componentWaveformsCalculated(false, message); }, this.task_standard_response_delay);
+                throw new Error(message);
+            }
+            setTimeout(() => { this.componentWaveformsCalculated(true, parsed); }, this.task_standard_response_delay);
+            return parsed;
+        },
+
+        // ==========================================
         // SPICE Code Generation Methods
         // ==========================================
 
@@ -1617,6 +1707,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
                 'boostConverter':                   'generate_boost_ngspice_circuit',
                 'sepicConverter':                   'generate_sepic_ngspice_circuit',
                 'powerFactorCorrection':            'generate_boost_ngspice_circuit',
+                'viennaRectifierConverter':         'generate_vienna_ngspice_circuit',
                 'pushPullConverter':                'generate_push_pull_ngspice_circuit',
                 'singleSwitchForwardConverter':     'generate_forward_ngspice_circuit',
                 'twoSwitchForwardConverter':        'generate_two_switch_forward_ngspice_circuit',

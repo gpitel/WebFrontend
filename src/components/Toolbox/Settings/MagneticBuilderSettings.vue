@@ -4,9 +4,15 @@ import { useMagneticBuilderSettingsStore } from '/MagneticBuilder/src/stores/mag
 import { useModelSettingsStore } from '/MagneticBuilder/src/stores/modelSettings'
 import { useMasStore } from '/src/stores/mas'
 import ElementFromList from 'WebSharedComponents/DataInput/ElementFromList.vue'
+import UserPreferencesSettings from 'WebSharedComponents/Common/UserPreferencesSettings.vue'
+import { waitForMkf, applyRealWindingGeometrySetting } from 'WebSharedComponents/assets/js/mkfRuntime'
 </script>
 
 <script>
+// In the plain block, not <script setup>: data() and methods below use these,
+// and an Options API member cannot see a <script setup> binding.
+import { BUILDER_LAYOUTS, layoutLabels, isKnownLayout } from '/MagneticBuilder/src/components/MagneticBuilder/layouts/index.js'
+
 
 export default {
     components: { Dialog },
@@ -31,6 +37,10 @@ export default {
         visible: { type: Boolean, default: false },
     },
     data() {
+        const layoutOptions = layoutLabels();
+        const layoutDescriptions = Object.fromEntries(
+            Object.entries(BUILDER_LAYOUTS).map(([key, layout]) => [key, layout.description]),
+        );
         const magneticBuilderSettingsStore = useMagneticBuilderSettingsStore();
         const modelSettingsStore = useModelSettingsStore();
         const masStore = useMasStore();
@@ -45,6 +55,7 @@ export default {
             enableTemperatureFilter: this.$settingsStore.adviserSettings.enableTemperatureFilter,
             maximumTemperature: this.$settingsStore.adviserSettings.maximumTemperature,
             enableVisualizers: magneticBuilderSettingsStore.enableVisualizers,
+            useRealWindingGeometry: this.$settingsStore.magneticBuilderSettings.useRealWindingGeometry,
             enableSimulation: this.$settingsStore.magneticBuilderSettings.enableSimulation,
             enableAutoSimulation: this.$settingsStore.magneticBuilderSettings.enableAutoSimulation,
             enableSubmenu: magneticBuilderSettingsStore.enableSubmenu,
@@ -57,13 +68,54 @@ export default {
             masStore,
             settingsChanged,
             localData,
+            layoutOptions,
+            layoutDescriptions,
         }
     },
     methods: {
+        /** The builder's arrangement (ABT #1121); roams with the profile. */
+        layoutChanged(event) {
+            const chosen = event.target.value;
+            if (!isKnownLayout(chosen)) {
+                throw new Error(`Unknown builder layout "${chosen}"`);
+            }
+            this.magneticBuilderSettingsStore.layout = chosen;
+            this.settingsChanged = true;
+        },
         onSettingChanged(setting) {
             this.localData[setting] = !this.localData[setting];
             this.$settingsStore.magneticBuilderSettings[setting] = this.localData[setting];
             this.settingsChanged = true;
+            if (setting === 'useRealWindingGeometry') {
+                this.rewindForRealWindingGeometry(this.localData[setting]);
+            }
+        },
+        // The flag decides how the coil is WOUND, and the painter only draws what it is
+        // given — so flipping it has to reach the engine and re-wind the design that is
+        // already in the store, or the views keep showing a layout made under the old
+        // setting until something else happens to wind again.
+        async rewindForRealWindingGeometry(useRealWindingGeometry) {
+            try {
+                const mkf = await waitForMkf();
+                await applyRealWindingGeometrySetting(mkf, useRealWindingGeometry);
+                if (this.masStore.mas?.magnetic?.coil?.turnsDescription == null) {
+                    return;   // nothing wound yet; the next wind picks the flag up
+                }
+                const resultRaw = await mkf.mas_autocomplete(JSON.stringify(this.masStore.mas), false, '{}');
+                if (typeof resultRaw === 'string' && resultRaw.startsWith('Exception')) {
+                    throw new Error(resultRaw);
+                }
+                const result = JSON.parse(resultRaw);
+                if (result?.magnetic?.coil?.turnsDescription == null) {
+                    throw new Error('the winder produced no turns');
+                }
+                this.masStore.mas = result;
+            } catch (error) {
+                // Loud, not silent: the setting is on but the design on screen is still
+                // the one wound without it, and the user needs to know which they are
+                // looking at (ABT #650 was a day lost to exactly this kind of silence).
+                console.error('Real winding was set but the design could not be re-wound:', error);
+            }
         },
         onAdviserSettingChanged(setting) {
             this.localData[setting] = !this.localData[setting];
@@ -285,6 +337,27 @@ export default {
                         </div>
                     </div>
 
+                    <!-- Layout (ABT #1121): the same choice MagneticBuilder's own dialog offers -->
+                    <div class="setting-item d-flex justify-content-between align-items-center py-3 border-bottom border-secondary">
+                        <div>
+                            <h6 class="text-white mb-1">Layout</h6>
+                            <small class="text-secondary">{{ layoutDescriptions[magneticBuilderSettingsStore.layout] }}</small>
+                        </div>
+                        <select
+                            data-cy="MagneticBuilderSettingsModal-layout-select"
+                            class="builder-layout-select"
+                            :value="magneticBuilderSettingsStore.layout"
+                            @change="layoutChanged"
+                        >
+                            <option v-for="(label, key) in layoutOptions" :key="key" :value="key">{{ label }}</option>
+                        </select>
+                    </div>
+
+                    <!-- Preferences (profile, ABT #1099) -->
+                    <div class="mb-3">
+                        <UserPreferencesSettings dataTestLabel="MagneticBuilderSettingsModal" @changed="settingsChanged = true" />
+                    </div>
+
                     <!-- Display Section -->
                     <div class="mb-3">
                         <h6 class="text-secondary text-uppercase small font-bold mb-3">Display</h6>
@@ -325,13 +398,33 @@ export default {
                                 <span class="text-white">3D Visualization</span>
                             </div>
                             <div class="form-check form-switch">
-                                <input 
+                                <input
                                     :data-cy="dataTestLabel + '-Settings-Modal-enable-visualization-button'"
-                                    class="form-check-input custom-switch" 
-                                    type="checkbox" 
+                                    class="form-check-input custom-switch"
+                                    type="checkbox"
                                     role="switch"
                                     :checked="localData.enableVisualizers"
                                     @change="onMagneticBuilderSettingChanged('enableVisualizers')"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="setting-item d-flex justify-content-between align-items-center py-2 border-bottom border-secondary">
+                            <div>
+                                <span class="text-white">Real winding</span>
+                                <small class="d-block text-secondary">
+                                    Draw the coil as it is actually wound — continuous conductor with leads,
+                                    pitch and dragbacks — in both the 2D and 3D views. Slower to build.
+                                </small>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input
+                                    :data-cy="dataTestLabel + '-Settings-Modal-real-winding-button'"
+                                    class="form-check-input custom-switch"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="localData.useRealWindingGeometry"
+                                    @change="onSettingChanged('useRealWindingGeometry')"
                                 >
                             </div>
                         </div>
@@ -621,6 +714,22 @@ export default {
 </template>
 
 <style scoped>
+.builder-layout-select {
+    flex: 0 0 auto;
+    max-width: 15rem;
+    padding: 0.3rem 0.5rem;
+    background-color: var(--p-gray-800);
+    color: var(--p-gray-100);
+    border: 1px solid var(--p-secondary);
+    border-radius: var(--p-border-radius);
+    font-size: 0.85rem;
+}
+
+.builder-layout-select:focus {
+    outline: none;
+    border-color: var(--p-primary);
+}
+
 .settings {
     z-index: 9999;
 }

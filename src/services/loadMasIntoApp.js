@@ -1,4 +1,61 @@
 import { checkAndFixMas } from 'WebSharedComponents/assets/js/utils.js'
+import { Convert, WaveformLabel } from 'WebSharedComponents/assets/ts/MAS.ts'
+
+// Map every WaveformLabel enum value by its lowercase form so legacy documents
+// with capitalized labels ("Triangular", "Rectangular") resolve to the current
+// schema spelling case-insensitively.
+const waveformLabelByLowercase = Object.fromEntries(
+    Object.values(WaveformLabel).map((value) => [value.toLowerCase(), value]));
+
+// Same null-stripping the MAS sentry applies before Convert validation:
+// quicktype optionals reject explicit null, and files exported by the app
+// carry plenty of them. Works on a deep copy — callers pass a throwaway.
+function stripNulls(value) {
+    if (Array.isArray(value)) {
+        value.forEach(stripNulls);
+        return value;
+    }
+    if (value && typeof value === 'object') {
+        for (const key of Object.keys(value)) {
+            if (value[key] === null || value[key] === 'null' || value[key] === undefined) {
+                delete value[key];
+            } else {
+                stripNulls(value[key]);
+            }
+        }
+    }
+    return value;
+}
+
+// Quarantine schema-invalid outputs at the import boundary. A file exported
+// mid-failure (e.g. windingLosses missing its required total after a partial
+// wind) otherwise poisons every later simulate/masAutocomplete call: the MAS
+// sentry validates the WHOLE document, so the stale outputs block the very
+// simulation that would replace them. Outputs are always recomputed live, so
+// dropping invalid ones loses nothing — but only drop them when they are
+// provably the problem: document invalid WITH outputs, valid WITHOUT.
+function quarantineInvalidOutputs(mas) {
+    if (!Array.isArray(mas.outputs) || mas.outputs.length === 0) {
+        return mas;
+    }
+    try {
+        Convert.toMas(JSON.stringify(stripNulls(JSON.parse(JSON.stringify(mas)))));
+        return mas;
+    } catch (originalError) {
+        try {
+            const probe = stripNulls(JSON.parse(JSON.stringify(mas)));
+            probe.outputs = [];
+            Convert.toMas(JSON.stringify(probe));
+        } catch (stillInvalid) {
+            // Outputs are not (or not the only) problem — leave the document
+            // untouched so the failure stays loud and points at the real field.
+            return mas;
+        }
+        console.warn(`Imported MAS has schema-invalid outputs — dropping them (simulation recomputes all outputs). Validation error: ${originalError.message}`);
+        mas.outputs = [];
+        return mas;
+    }
+}
 
 // Sessions saved by older frontend versions carry enum spellings the current
 // MAS schema rejects ('P2' instead of 'PD2', 'OVC-III' instead of 'III',
@@ -7,6 +64,13 @@ import { checkAndFixMas } from 'WebSharedComponents/assets/js/utils.js'
 // silently stops working (web bug reports #144/#145). Normalize the known
 // legacy spellings before anything validates the document.
 export function migrateLegacyMas(mas) {
+    // The app's own "Download MAS file" export strips `outputs` (stale results),
+    // but the engine's Mas parser requires the key — re-importing an exported
+    // design failed mas_autocomplete with "key 'outputs' not found", leaving the
+    // core unprocessed and the builder in a worker-returned-minus-one loop.
+    if (!Array.isArray(mas.outputs)) {
+        mas.outputs = [];
+    }
     const requirements = mas?.inputs?.designRequirements;
     const insulation = requirements?.insulation;
     if (insulation != null) {
@@ -23,6 +87,25 @@ export function migrateLegacyMas(mas) {
         const lowercased = requirements.wiringTechnology.toLowerCase();
         if (['wound', 'printed', 'stamped', 'deposition'].includes(lowercased)) {
             requirements.wiringTechnology = lowercased;
+        }
+    }
+    // Legacy exports capitalized waveform labels ("Triangular"). The engine's
+    // from_json rejects them ("Input JSON does not conform to schema!") and the
+    // worker call returns -1, which the builder then retries in a loop — the
+    // loaded design floods the console and never renders losses. Normalize
+    // case-insensitively against the current enum.
+    for (const operatingPoint of (mas?.inputs?.operatingPoints || [])) {
+        for (const excitation of (operatingPoint?.excitationsPerWinding || [])) {
+            if (excitation == null) continue;
+            for (const signal of [excitation.current, excitation.voltage, excitation.magnetizingCurrent]) {
+                const label = signal?.processed?.label;
+                if (typeof label === 'string') {
+                    const canonical = waveformLabelByLowercase[label.toLowerCase()];
+                    if (canonical && canonical !== label) {
+                        signal.processed.label = canonical;
+                    }
+                }
+            }
         }
     }
     // Old Outputs kept magnetizingInductance/leakageInductance at the top level;
@@ -51,12 +134,69 @@ export function migrateLegacyMas(mas) {
 // import: fix + autocomplete it, reset the mas store, prime the state store,
 // and navigate to the magnetic tool. Extracted from Header.readMASFile so the
 // Header (file import) and My Designs (cloud open) share one code path.
-export async function loadMasIntoApp(newMas, { masStore, stateStore, userStore, taskQueueStore, router, route }) {
-    if (newMas.magnetic == null) {
-        throw new Error('Not a MAS document: missing "magnetic"');
+/**
+ * A MAS file is either a full MAS document ({inputs, magnetic, outputs}) or a
+ * MAS Magnetic document (the magnetic alone: {core, coil, ...}), which is what
+ * "Download MAS file only with magnetic" produces (ABT #1388). Return the MAS
+ * shape the app loads: a Magnetic document is wrapped, anything else is
+ * returned as it is for describeNonMasDocument to judge.
+ */
+export function asMasDocument(doc) {
+    const isMagneticDocument = doc != null && typeof doc === 'object' && !Array.isArray(doc)
+        && doc.magnetic == null && doc.core != null && doc.coil != null;
+    return isMagneticDocument ? { magnetic: doc } : doc;
+}
+
+// The keys magnetic.json declares. Only the MAGNETIC key set is checked: files in
+// the wild carry extra TOP-LEVEL keys the current schema no longer defines
+// (tests/fixtures/etd49_wound_10uH_5T.json has 'masVersion'), and those load fine.
+const MAS_MAGNETIC_KEYS = ['name', 'core', 'coil', 'manufacturerInfo', 'distributorsInfo',
+    'rotation', 'coreElectricalReference', 'shunts'];
+
+// "Is this a MAS document at all?" — a shape sniff, not schema validation (legacy
+// documents are migrated, not rejected). Returns null when the document is
+// plausibly MAS, otherwise a message naming what is actually wrong with it.
+//
+// A bare `newMas.magnetic != null` gate was not enough: a customer's in-house
+// sizing export (MAS_2_Custom_16_Sep_2026.json) carried a `magnetic` key holding
+// scalars — Lmag_calc_uH, AL_nH_per_turn2, C_CM_pF — so it sailed past the gate
+// and died deep inside checkAndFixMas with "Cannot read properties of undefined
+// (reading 'functionalDescription')", logged to a console the user never opens.
+//
+// A MAS Magnetic document has no inputs by definition, so only a full MAS file
+// must carry them.
+export function describeNonMasDocument(doc) {
+    if (doc == null || typeof doc !== 'object' || Array.isArray(doc)) {
+        return 'the file does not contain a JSON object.';
     }
+    const mas = asMasDocument(doc);
+    const magneticOnly = mas !== doc;
+    const magnetic = mas.magnetic;
+    if (magnetic == null || typeof magnetic !== 'object' || Array.isArray(magnetic)) {
+        return 'it has no "magnetic" section, and it is not a MAS Magnetic (a "core" and a "coil").';
+    }
+    const magneticKeys = Object.keys(magnetic);
+    if (!magneticKeys.some((key) => MAS_MAGNETIC_KEYS.includes(key))) {
+        return `its "magnetic" section holds ${magneticKeys.join(', ')} instead of a core and a coil.`;
+    }
+    if (!magneticOnly) {
+        const inputs = mas.inputs;
+        if (inputs == null || inputs.designRequirements == null || inputs.operatingPoints == null) {
+            return 'it has no "inputs" with design requirements and operating points.';
+        }
+    }
+    return null;
+}
+
+export async function loadMasIntoApp(doc, { masStore, stateStore, userStore, taskQueueStore, router, route }) {
+    const notMas = describeNonMasDocument(doc);
+    if (notMas != null) {
+        throw new Error(`This file is not a MAS design: ${notMas}`);
+    }
+    const newMas = asMasDocument(doc);
 
     migrateLegacyMas(newMas);
+    quarantineInvalidOutputs(newMas);
 
     const response = await checkAndFixMas(newMas, taskQueueStore);
 
@@ -99,7 +239,12 @@ export async function loadMasIntoApp(newMas, { masStore, stateStore, userStore, 
     stateStore.selectWorkflow("design");
     stateStore.selectApplication(stateStore.SupportedApplications.Power);
     stateStore.selectTool("magneticBuilder");
-    stateStore.setCurrentToolSubsection("magneticBuilder");
+    // A design saved before anything was built (inputs only, no core shape)
+    // has nothing to show in the builder pane — land on the inputs instead
+    // of an empty Design section (ABT #344).
+    const loadedShape = autocompletedMas.magnetic?.core?.functionalDescription?.shape;
+    const hasDesignedCore = loadedShape != null && !(typeof loadedShape === 'string' && loadedShape.trim() === '');
+    stateStore.setCurrentToolSubsection(hasDesignedCore ? "magneticBuilder" : "designRequirements");
     stateStore.setCurrentToolSubsectionStatus("designRequirements", true);
     stateStore.setCurrentToolSubsectionStatus("operatingPoints", true);
     stateStore.operatingPoints.modePerPoint = [];

@@ -11,13 +11,15 @@ import { useMasStore } from '/src/stores/mas'
 import { useSettingsStore } from '/src/stores/settings'
 import { useStateStore } from '/src/stores/state'
 import { initTelemetry } from 'WebSharedComponents/assets/js/telemetry.js'
+import { assertValidMas } from 'WebSharedComponents/assets/js/masValidator.js'
+import { setMasSchemaValidator } from '/MagneticBuilder/src/stores/taskQueue'
 import { useStyleStore } from '/src/stores/style'
 import { useFairRiteStyleStore } from '/src/stores/fairRiteStyle'
 import { useCustomPartsStore } from '/src/stores/customParts'
 import { useInventoryStore } from '/src/stores/inventory'
 import { useModelSettingsStore } from '/MagneticBuilder/src/stores/modelSettings'
 import { VueWindowSizePlugin } from 'vue-window-size/plugin';
-import { initWorker } from 'WebSharedComponents/assets/js/mkfRuntime'
+import { initWorker, applyRealWindingGeometrySetting, setEngineRestoreHandler } from 'WebSharedComponents/assets/js/mkfRuntime'
 import { initKirchhoffWorker } from 'WebSharedComponents/assets/js/kirchhoffRuntime'
 import VueLatex from 'vatex'
 import { checkAndClearOutdatedStores, getVersionedWasmUrl } from '/src/stores/storeVersioning'
@@ -31,6 +33,13 @@ import { definePreset } from '@primeuix/themes'
 import 'primeicons/primeicons.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
 import '@fortawesome/fontawesome-free/css/all.min.css';
+// ABT #944: was a <script src="https://unpkg.com/default-passive-events"> in index.html — an
+// UNVERSIONED CDN specifier, so unpkg served whatever that package published most recently and it
+// executed on every page load with no pin, no review and no integrity hash. Bundled now, like
+// bootstrap-icons above (whose CDN <link> was pulling an OLDER 1.11.3 over the 1.13.1 this import
+// already provides). Removes a supply-chain exposure, a hard dependency on two third parties being
+// reachable, and an IP/User-Agent leak to them on every visit.
+import 'default-passive-events'
 // primeflex.css is imported from src/assets/scss/custom.scss after the
 // theme-base so PrimeFlex's grid utilities win the cascade for col-N.
 
@@ -152,16 +161,40 @@ app.config.globalProperties.$stateStore = useStateStore()
 // cookie is still valid, and start settings sync while logged in. Everything
 // is fire-and-forget — anonymous use must never wait on the account service.
 import { useAuthStore } from '/src/stores/auth'
-import { startSettingsSync } from '/src/services/settingsSync'
+import { installProfileSettings, registerProfileSection, syncProfileSettings } from '/src/services/profileSettings'
+import { useMagneticBuilderSettingsStore } from '/MagneticBuilder/src/stores/magneticBuilderSettings'
 const _authStore = useAuthStore()
+// Roaming sections (ABT #1099): each store's tunables, never navigation state
+// or consent. Add a key here and it roams; see services/profileSettings.js.
+registerProfileSection('settings', app.config.globalProperties.$settingsStore, [
+    'adviserSettings', 'magneticBuilderSettings', 'coreAdviserSettings',
+    'magneticAdviserSettings', 'operatingPointSettings', 'catalogAdviserSettings',
+    'userPreferences',
+])
+registerProfileSection('models', app.config.globalProperties.$userStore, [
+    'selectedModels', 'simulationUseCurrentAsInput',
+])
+registerProfileSection('simulationModels', useModelSettingsStore(), [
+    'magneticFieldStrengthModel', 'magneticFieldStrengthFringingEffectModel', 'reluctanceModel',
+    'coreLossesModel', 'coreTemperatureModel', 'coreThermalResistanceModel',
+    'windingSkinEffectLossesModel', 'windingProximityEffectLossesModel', 'strayCapacitanceModel',
+    'coilEnableUserWindingLossesModels', 'painterNumberPointsX', 'painterNumberPointsY',
+])
+registerProfileSection('magneticBuilder', useMagneticBuilderSettingsStore(), [
+    'enableVisualizers', 'enableSimulation', 'enableAutoSimulation', 'enableSubmenu',
+    'enableCustomize', 'enableGraphs', 'enableContextMenu', 'enableWindingStudio',
+    // The builder's arrangement (ABT #1121) follows the account like the rest.
+    'layout',
+])
+installProfileSettings(() => _authStore.isLoggedIn)
 _authStore.fetchMe().then(() => {
     if (_authStore.isLoggedIn) {
-        startSettingsSync(app.config.globalProperties.$settingsStore)
+        syncProfileSettings()
     }
 })
 _authStore.$subscribe(() => {
     if (_authStore.isLoggedIn) {
-        startSettingsSync(app.config.globalProperties.$settingsStore)
+        syncProfileSettings()
     }
 })
 
@@ -188,6 +221,38 @@ export const globals = app.config.globalProperties
 // Preload function to start loading WASM and data in background from home page
 let preloadPromise = null;
 let preloadedMkf = null; // Store preloaded mkf separately, don't set $mkf until engine loader
+
+// Everything the app loads into a fresh engine: the catalogues, the user's Core Studio parts on
+// top of them, and the account inventory scope. Start-up runs it once; the runtime runs it again
+// if its watchdog has to replace a stuck engine worker, which otherwise comes back empty (the
+// runtime replays the engine settings itself).
+async function loadEngineData(mkf) {
+    console.warn("[MAIN] Preload: Loading core materials, shapes and wires...");
+    await Promise.all([
+        mkf.load_core_materials("").then(() => console.log("Preload: Core materials loaded")),
+        mkf.load_core_shapes("").then(() => console.log("Preload: Core shapes loaded")),
+        mkf.load_wires("").then(() => console.log("Preload: Wires loaded"))
+    ]);
+
+    // Re-inject the user's Core Studio parts (custom shapes/materials)
+    // on top of the catalog so they show up in every selector.
+    await useCustomPartsStore().reinject(mkf);
+
+    // Account inventory (Phase 2): bring the engine in line with the
+    // persisted adviser scope (merge-inject / LibraryContext). No-op
+    // for scope 'public' or when signed out; failures are loud but
+    // must not block the engine boot for anonymous use.
+    try {
+        await useInventoryStore().applyScope(mkf);
+    } catch (error) {
+        console.error('Inventory scope could not be applied:', error);
+    }
+}
+setEngineRestoreHandler(loadEngineData);
+// The builder's MAS sentry validates against the real MAS JSON Schema, which this
+// host bundles (ABT #1388); hosts that install nothing keep its type check.
+setMasSchemaValidator(assertValidMas);
+
 function preloadMKF() {
     if (preloadPromise || app.config.globalProperties.$mkf != null) {
         return preloadPromise; // Already preloading or loaded
@@ -202,28 +267,16 @@ function preloadMKF() {
             const wasmJsUrl = getVersionedWasmUrl(`${import.meta.env.BASE_URL}wasm/libMKF.wasm.js`);
             const mkf = await initWorker(wasmJsUrl);
             preloadedMkf = mkf; // Store but don't set globally yet
+
+            // Real winding BEFORE the first wind. The painter draws the turns it is
+            // given and never re-winds, so a coil wound while this was still off is
+            // painted as idealised rings however the flag reads later — which is what
+            // made the 2D view fall back to the ideal layout on every page reload.
+            await applyRealWindingGeometrySetting(
+                mkf, useSettingsStore().magneticBuilderSettings.useRealWindingGeometry);
             
             // Load data and wait for completion
-            console.warn("[MAIN] Preload: Loading core materials, shapes and wires...");
-            await Promise.all([
-                mkf.load_core_materials("").then(() => console.log("Preload: Core materials loaded")),
-                mkf.load_core_shapes("").then(() => console.log("Preload: Core shapes loaded")),
-                mkf.load_wires("").then(() => console.log("Preload: Wires loaded"))
-            ]);
-
-            // Re-inject the user's Core Studio parts (custom shapes/materials)
-            // on top of the catalog so they show up in every selector.
-            await useCustomPartsStore().reinject(mkf);
-
-            // Account inventory (Phase 2): bring the engine in line with the
-            // persisted adviser scope (merge-inject / LibraryContext). No-op
-            // for scope 'public' or when signed out; failures are loud but
-            // must not block the engine boot for anonymous use.
-            try {
-                await useInventoryStore().applyScope(mkf);
-            } catch (error) {
-                console.error('Inventory scope could not be applied:', error);
-            }
+            await loadEngineData(mkf);
             
             // Initialize model settings from WASM during preload
             console.warn("Preload: Initializing model settings...");
@@ -312,17 +365,58 @@ app.mount("#app");
 // If Kirchhoff opened us to design a magnetic, wire the cross-origin handoff (no-op otherwise).
 installKirchhoffHandoff(router);
 
+// Every exit from /engine_loader must be VERIFIED, not fire-and-forget. A one-shot router.push can be
+// issued while the loader navigation is still in flight and simply be superseded, which parks the app
+// on the loader until the tab is closed (ABT #909). Sitting on the loader once the engine is ready is
+// ALWAYS wrong, so: push, then keep re-checking until we are actually off it. Stops immediately when
+// we leave — including when the user navigated somewhere else themselves, since then the route is no
+// longer EngineLoader and we must not yank them.
+function leaveEngineLoader(router, targetPath) {
+    if (targetPath == null) return;
+    const deadline = Date.now() + 60000;
+    let attempts = 0;
+    const tryLeave = () => {
+        if (router.currentRoute.value.name !== 'EngineLoader') return;   // out, or the user moved
+        attempts++;
+        if (attempts === 1 || attempts % 20 === 0) {
+            console.warn(`[EngineLoader] still on the loader after ${attempts} exit attempt(s); `
+                         + `target=${targetPath}`);
+        }
+        router.push(targetPath).catch((e) => {
+            const msg = String(e?.message || e);
+            console.warn('[EngineLoader] router.push was rejected:', msg);
+            // A route's lazy chunk failed to load, so the SPA navigation can never succeed and
+            // retrying it is pointless — every attempt fails the same way and the app sits on the
+            // loader forever (ABT #909). This happens in dev when vite cannot serve a module under
+            // concurrent cold loads, and in production when a deploy has replaced the hashed chunk
+            // this tab still references. Both recover from a hard navigation, which re-fetches the
+            // current index.html and its chunk map. Once per target, so a genuinely broken build
+            // cannot put us in a reload loop.
+            if (!/dynamically imported module|Importing a module script failed|Failed to fetch/i.test(msg)) return;
+            const key = 'omHardNavAfterChunkFailure:' + targetPath;
+            try {
+                if (sessionStorage.getItem(key)) return;
+                sessionStorage.setItem(key, '1');
+            } catch { /* private mode: fall through and navigate anyway */ }
+            console.warn('[EngineLoader] lazy chunk unavailable — recovering with a full page load');
+            window.location.assign(targetPath);
+        });
+        if (Date.now() < deadline) setTimeout(tryLeave, 250);
+    };
+    tryLeave();
+}
+
 router.beforeEach((to, from, next) => {
 
     if (app.config.globalProperties.$mkf != null && !app.config.globalProperties.$mkf._loading && to.name == "EngineLoader") {
         if (app.config.globalProperties.$userStore.loadingPath != null) {
             const newPath = app.config.globalProperties.$userStore.loadingPath;
             app.config.globalProperties.$userStore.loadingPath = null;
-            router.push(newPath);
+            leaveEngineLoader(router, newPath);
         }
         else {
             // If WASM is loaded and we go to engine loader, we just return to where we were
-            setTimeout(() => {router.push(from.path);}, 500);
+            setTimeout(() => leaveEngineLoader(router, from.path), 500);
         }
     }
     // On the fully-initialized worker proxy, `$mkf._loading` resolves to a
@@ -342,7 +436,7 @@ router.beforeEach((to, from, next) => {
     else if (app.config.globalProperties.$userStore.loadingPath !=null && app.config.globalProperties.$mkf != null && to.name == "EngineLoader") {
         const newPath = app.config.globalProperties.$userStore.loadingPath;
         app.config.globalProperties.$userStore.loadingPath = null;
-        setTimeout(() => {router.push(newPath);}, 500);
+        setTimeout(() => leaveEngineLoader(router, newPath), 500);
     }
 
     const nonDataViews = [`${import.meta.env.BASE_URL}`, `${import.meta.env.BASE_URL}home`, `${import.meta.env.BASE_URL}insulation_adviser`, `${import.meta.env.BASE_URL}schematic_playground`]
@@ -400,7 +494,12 @@ router.beforeEach((to, from, next) => {
                         console.warn("Initializing MKF in Web Worker (fresh)...")
                         // WASM files are in public/wasm folder, served at /wasm/ in production
                         const wasmJsUrl = getVersionedWasmUrl(`${import.meta.env.BASE_URL}wasm/libMKF.wasm.js`);
-                        return await initWorker(wasmJsUrl);
+                        const freshMkf = await initWorker(wasmJsUrl);
+                        // Same as the preload path: the flag has to be in the engine
+                        // before anything winds, not before anything paints.
+                        await applyRealWindingGeometrySetting(
+                            freshMkf, useSettingsStore().magneticBuilderSettings.useRealWindingGeometry);
+                        return freshMkf;
                     })();
             
             (async () => {
@@ -428,6 +527,12 @@ router.beforeEach((to, from, next) => {
                     // If preloadPromise exists, it includes data loading, so wait for it fully
                     const mkf = await initPromise;
                     app.config.globalProperties.$mkf = mkf;
+                    // Diagnostic flag (ABT #909): lets a stalled page be classified as "engine came
+                    // up but the router never left the loader" vs "the engine never came up".
+                    window.__omEngineReady = true;
+                    // ABT #929: the engine is up, so a LATER transient failure deserves its own
+                    // retry budget rather than inheriting a spent one from earlier in this session.
+                    try { sessionStorage.removeItem('omEngineInitRetries'); } catch { /* private mode */ }
 
                     // MKF is up — now warm webKirchhoff off the critical path (fire-and-forget,
                     // idempotent). Deep-linked wizard views get a working converter engine
@@ -500,19 +605,63 @@ router.beforeEach((to, from, next) => {
                     // currentRoute is still the previous route at the first check.
                     // A one-shot check loses that race and parks the app on
                     // /engine_loader forever.
-                    const redirectDeadline = Date.now() + 10000;
-                    const redirectWhenOnLoader = () => {
+                    // This used to be a 100 ms poll bounded by a 10 s deadline. Under load — several
+                    // WASM engines compiling at once, or a cold vite dep-optimise after a rebuild —
+                    // the router can take longer than that to resolve the lazy-loaded EngineLoader
+                    // route. When the poll gave up first, nothing was left to move the app on and it
+                    // parked on /engine_loader until the tab was closed: the stall behind ABT #909
+                    // (and the reason batch Playwright runs produced a different set of
+                    // openWizard timeouts every time).
+                    //
+                    // Watch the router instead of racing a clock. The guard is unchanged — only ever
+                    // redirect while we are ACTUALLY on the loader — so a user who navigated away is
+                    // never yanked, which is what makes an unbounded watcher safe: the loader is a
+                    // trampoline, never a destination.
+                    // Not necessarily on the loader yet — the navigation to it may still be
+                    // resolving — so watch for it landing as well as retrying the exit itself.
+                    let stopWatching = null;
+                    const exit = () => {
                         if (router.currentRoute.value.name === 'EngineLoader') {
-                            router.push(newPath);
+                            if (stopWatching) { stopWatching(); stopWatching = null; }
+                            leaveEngineLoader(router, newPath);
+                            return true;
                         }
-                        else if (Date.now() < redirectDeadline) {
-                            setTimeout(redirectWhenOnLoader, 100);
-                        }
-                        // else: the user really navigated somewhere else — leave them be.
+                        return false;
                     };
-                    setTimeout(redirectWhenOnLoader, remainingTime)
+                    setTimeout(() => {
+                        if (exit()) return;
+                        stopWatching = router.afterEach(() => { exit(); });
+                    }, remainingTime)
                 } catch (error) {
-                    console.error("Error initializing MKF:", error);
+                    // A throw here leaves the app on /engine_loader with a spinner and no
+                    // explanation. Mark it distinctively so a stall can be told apart from the
+                    // routing race above (ABT #909) instead of both looking like "it hung".
+                    window.__omEngineLoadError = String(error?.message || error);
+                    console.error("[EngineLoader] engine initialization FAILED — the app cannot leave "
+                                  + "the loader:", error);
+                    // ABT #929: "cannot leave the loader" used to be the end of it — the spinner ran
+                    // forever under a heading promising "just a few seconds", and the tab had to be
+                    // closed. The dominant cause is a transient failure fetching the 32 MB engine,
+                    // which a fresh document clears, so retry before giving up. Bounded via
+                    // sessionStorage exactly like the chunk-failure recovery in leaveEngineLoader,
+                    // so a genuinely broken build cannot put the app in a reload loop.
+                    const retryKey = 'omEngineInitRetries';
+                    let attempts = 0;
+                    try { attempts = Number(sessionStorage.getItem(retryKey) || 0); } catch { /* private mode */ }
+                    if (attempts < 2) {
+                        try { sessionStorage.setItem(retryKey, String(attempts + 1)); } catch { /* private mode */ }
+                        console.warn(`[EngineLoader] retrying engine initialization `
+                                     + `(attempt ${attempts + 1} of 2) with a full page load`);
+                        window.location.reload();
+                        return;
+                    }
+                    // Out of retries: stop showing a spinner that implies progress. The loader view
+                    // renders this instead (EngineLoader.vue), so the user learns what happened and
+                    // can retry deliberately rather than watching an animation that means nothing.
+                    console.error('[EngineLoader] giving up after ' + attempts + ' retries');
+                    window.dispatchEvent(new CustomEvent('om-engine-load-failed', {
+                        detail: { message: window.__omEngineLoadError },
+                    }));
                 }
             })();
 

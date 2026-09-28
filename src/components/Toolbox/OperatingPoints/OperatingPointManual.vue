@@ -47,6 +47,8 @@ export default {
         }
 
         return {
+            // Which signal the user drives for an inductor; the other is derived.
+            inductorDrivenBy: 'current',
             masStore,
             taskQueueStore,
         }
@@ -54,6 +56,21 @@ export default {
     computed: {
         isInductor() {
             return this.masStore.mas.inputs.designRequirements.turnsRatios.length === 0;
+        },
+        // Web bug report #169: "can't edit the voltage waveform at OP point".
+        //
+        // For an inductor the two signals are not independent (v = L di/dt), so ONE of them
+        // has to be the driven one. That part was right. What was wrong is that the choice
+        // was hardcoded to current: the voltage card was dimmed with pointer-events:none and
+        // no explanation, so a user who wanted to specify voltage and get current had no way
+        // to say so and nothing telling them why. The engine has supported that direction all
+        // along -- induce('voltage') calls calculateInducedCurrent, and this component already
+        // wires it up.
+        voltageIsDerived() {
+            return this.isInductor && this.inductorDrivenBy == 'current';
+        },
+        currentIsDerived() {
+            return this.isInductor && this.inductorDrivenBy == 'voltage';
         },
         hasInductance() {
             const ind = this.masStore.mas.inputs.designRequirements.magnetizingInductance;
@@ -88,6 +105,13 @@ export default {
         if (this._autoInduceTimer) clearTimeout(this._autoInduceTimer);
     },
     methods: {
+        // Web bug report #169. Flip which signal the user drives, and immediately derive the
+        // other one so the pair never sits inconsistent.
+        setInductorDrivenBy(signalDescriptor) {
+            this.inductorDrivenBy = signalDescriptor;
+            this.induce(signalDescriptor);
+        },
+
         updatedWaveform(signalDescriptor) {
             this.$emit('updatedWaveform', signalDescriptor);
             this.$emit('updatedSignal');
@@ -115,10 +139,18 @@ export default {
             this.autoInduceVoltageFromCurrent();
         },
         async induce(sourceSignalDescriptor){
+            const excitation = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex]?.excitationsPerWinding[this.currentWindingIndex];
+            if (excitation?.[sourceSignalDescriptor]?.processed == null) {
+                // A desynced/new operating point without processed source data
+                // used to die here with a bare TypeError on .dutyCycle,
+                // leaving the builder stuck (ABT #345). Say what is missing.
+                console.error(`[induce] Operating point ${this.currentOperatingPointIndex}, winding ${this.currentWindingIndex}: ${sourceSignalDescriptor} has no processed data — define its waveform before inducing the counterpart signal.`);
+                return;
+            }
             if (sourceSignalDescriptor == 'current'){
 
                 try {
-                    var magnetizingInductance = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.magnetizingInductance);
+                    var magnetizingInductance = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.magnetizingInductance, 'the magnetizing inductance in Design Requirements');
                     // Capture user preferences before WASM overwrites them.
                     // WASM discretizes waveforms into N points causing dutyCycle = k/N rounding
                     // (e.g. 94.37% → 95% with N=20). WASM also returns label="custom" which
@@ -126,6 +158,15 @@ export default {
                     const userDutyCycle = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].current.processed.dutyCycle;
                     const originalVoltageLabel = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].voltage.processed?.label;
                     var voltage = await this.taskQueueStore.calculateInducedVoltage(this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex], magnetizingInductance);
+                    // Never store a null/absent field: consumers read
+                    // voltage.processed.rms unconditionally, so a stored null
+                    // poisons every later render. Fail loudly instead.
+                    if (voltage?.waveform == null || voltage?.harmonics == null || voltage?.processed == null) {
+                        throw new Error(`calculateInducedVoltage returned an incomplete signal `
+                            + `(waveform=${voltage?.waveform == null ? 'null' : 'ok'}, `
+                            + `harmonics=${voltage?.harmonics == null ? 'null' : 'ok'}, `
+                            + `processed=${voltage?.processed == null ? 'null' : 'ok'}) — store left untouched`);
+                    }
                     if (userDutyCycle != null) voltage.processed.dutyCycle = userDutyCycle;
                     if (originalVoltageLabel && originalVoltageLabel.toLowerCase() !== 'custom') voltage.processed.label = originalVoltageLabel;
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].voltage.waveform = voltage.waveform;
@@ -140,9 +181,15 @@ export default {
             else if (sourceSignalDescriptor == 'voltage'){
 
                 try {
-                    var magnetizingInductance = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.magnetizingInductance);
+                    var magnetizingInductance = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.magnetizingInductance, 'the magnetizing inductance in Design Requirements');
                     var current = await this.taskQueueStore.calculateInducedCurrent(this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex], magnetizingInductance);
 
+                    if (current?.waveform == null || current?.harmonics == null || current?.processed == null) {
+                        throw new Error(`calculateInducedCurrent returned an incomplete signal `
+                            + `(waveform=${current?.waveform == null ? 'null' : 'ok'}, `
+                            + `harmonics=${current?.harmonics == null ? 'null' : 'ok'}, `
+                            + `processed=${current?.processed == null ? 'null' : 'ok'}) — store left untouched`);
+                    }
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].current.waveform = current.waveform;
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].current.harmonics = current.harmonics;
                     this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex].excitationsPerWinding[this.currentWindingIndex].current.processed = current.processed;
@@ -189,7 +236,7 @@ export default {
                     </div>
                 </div>
 
-                <div class="opm-card opm-card-current">
+                <div class="opm-card opm-card-current" :class="{ 'opm-disabled': currentIsDerived }">
                     <div class="opm-card-header">
                         <i class="pi pi-volume-up"></i>
                         <span>Current waveform</span>
@@ -220,10 +267,22 @@ export default {
                     </div>
                 </div>
 
-                <div class="opm-card opm-card-voltage" :class="{ 'opm-disabled': isInductor }">
+                <div class="opm-card opm-card-voltage" :class="{ 'opm-disabled': voltageIsDerived }">
                     <div class="opm-card-header">
                         <i class="pi pi-bolt"></i>
                         <span>Voltage waveform</span>
+                    </div>
+                    <div v-if="isInductor" class="opm-derived-note">
+                        <template v-if="voltageIsDerived">
+                            Derived from the current: for an inductor v = L di/dt, so only one of the two can be set.
+                            <button type="button" class="opm-link-btn" :data-cy="dataTestLabel + '-drive-with-voltage'"
+                                @click="setInductorDrivenBy('voltage')">Set the voltage instead</button>
+                        </template>
+                        <template v-else>
+                            You are setting the voltage; the current is derived from it.
+                            <button type="button" class="opm-link-btn" :data-cy="dataTestLabel + '-drive-with-current'"
+                                @click="setInductorDrivenBy('current')">Go back to setting the current</button>
+                        </template>
                     </div>
                     <div class="opm-card-body">
                         <WaveformInput
@@ -232,7 +291,7 @@ export default {
                             :defaultValue="defaultOperatingPointExcitation"
                             :dataTestLabel="dataTestLabel + '-selected-voltage'"
                             :signalDescriptor="'voltage'"
-                            :disabled="isInductor"
+                            :disabled="voltageIsDerived"
                             @peakToPeakChanged="masStore.updatedInputExcitationProcessed('voltage')"
                             @offsetChanged="masStore.updatedInputExcitationProcessed('voltage')"
                             @labelChanged="masStore.updatedInputExcitationProcessed('voltage')"
@@ -244,7 +303,7 @@ export default {
                             :defaultValue="defaultOperatingPointExcitation"
                             :dataTestLabel="dataTestLabel + '-selected-voltage'"
                             :signalDescriptor="'voltage'"
-                            :disabled="isInductor"
+                            :disabled="voltageIsDerived"
                             @labelChanged="masStore.updatedInputExcitationProcessed('voltage')"
                             @updatedTime="masStore.updatedInputExcitationWaveformUpdatedFromProcessed('voltage')"
                             @updatedData="masStore.updatedInputExcitationWaveformUpdatedFromProcessed('voltage')"
@@ -372,6 +431,27 @@ export default {
 
 .opm-card-voltage {
     border-left-color: rgba(var(--p-info-rgb), 0.7);
+}
+
+.opm-derived-note {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: rgba(var(--p-white-rgb), 0.75);
+    background: rgba(var(--p-primary-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.25);
+}
+
+.opm-link-btn {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin-left: 0.35rem;
+    color: var(--p-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
 }
 
 .opm-disabled {

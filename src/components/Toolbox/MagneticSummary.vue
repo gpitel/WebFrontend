@@ -233,9 +233,91 @@ export default {
             const gapping = core?.functionalDescription?.gapping;
             if (gapping?.length > 0) {
                 const nonResidualGaps = gapping.filter(g => g.type?.toLowerCase() !== 'residual');
-                const totalGap = nonResidualGaps.reduce((sum, g) => sum + (g.length || 0), 0);
-                const aux = formatDimension(totalGap);
-                data.push({ parameter: 'Total Gap Length', value: `${removeTrailingZeroes(aux.label, 3)} ${aux.unit}` });
+                // Web bug report #169: this used to be labelled "Total Gap Length" and was a
+                // plain sum over every gap. Gaps in DIFFERENT columns are parallel branches of
+                // the magnetic circuit, not series ones -- flux crosses the centre gap and then
+                // ONE lateral, so summing all three overstates a spacer by 50% on a 3-column
+                // core (a 1.05 mm spacer read as 3.15 mm). Report what each number actually is
+                // and let the reluctance stay MKF's job; do not invent an effective gap here.
+                const lengths = nonResidualGaps.map(g => g.length || 0);
+                const sumOfGaps = lengths.reduce((sum, l) => sum + l, 0);
+                const allEqual = lengths.length > 0 && lengths.every(l => Math.abs(l - lengths[0]) <= 1e-12);
+
+                if (allEqual && lengths.length > 1) {
+                    // The spacer case: one gap of equal length per column.
+                    const perColumn = formatDimension(lengths[0]);
+                    data.push({
+                        parameter: 'Gap Length (per column)',
+                        value: `${removeTrailingZeroes(perColumn.label, 3)} ${perColumn.unit}`
+                    });
+                }
+                // The number the reporter of #169 actually wanted: the gap the FLUX PATH
+                // crosses. A path leaves the centre column, crosses its gap, returns through
+                // ONE lateral column and crosses that one -- the laterals are parallel
+                // branches, so only one of them is in any given path.
+                //
+                // This is series addition within a branch plus a column count, not a
+                // reluctance model: gaps stacked in the SAME column (distributed gapping) are
+                // genuinely in series and do add. Anything beyond that -- fringing, unequal
+                // lateral areas, the parallel combination when the laterals differ -- is
+                // MKF's, and when the laterals are NOT identical this deliberately shows
+                // nothing rather than guessing.
+                const columns = core?.processedDescription?.columns;
+                let seriesGapLength = null;
+                let gapsInPath = null;
+                if (Array.isArray(columns) && columns.length > 0 && nonResidualGaps.every(g => Array.isArray(g.coordinates))) {
+                    const columnOf = (gap) => {
+                        let best = null, bestDistance = Infinity;
+                        columns.forEach((column) => {
+                            if (!Array.isArray(column.coordinates)) return;
+                            const distance = Math.abs((gap.coordinates[0] ?? 0) - (column.coordinates[0] ?? 0));
+                            if (distance < bestDistance) { bestDistance = distance; best = column; }
+                        });
+                        return best;
+                    };
+                    const perColumnLength = new Map();
+                    const perColumnCount = new Map();
+                    const perColumnType = new Map();
+                    let unmatched = false;
+                    nonResidualGaps.forEach((gap) => {
+                        const column = columnOf(gap);
+                        if (column == null) { unmatched = true; return; }
+                        const key = column.coordinates.join(',');
+                        perColumnLength.set(key, (perColumnLength.get(key) || 0) + (gap.length || 0));
+                        perColumnCount.set(key, (perColumnCount.get(key) || 0) + 1);
+                        perColumnType.set(key, column.type);
+                    });
+                    if (!unmatched && perColumnLength.size > 0) {
+                        const centralKeys = [...perColumnType.entries()].filter(([, t]) => t === 'central').map(([k]) => k);
+                        const lateralKeys = [...perColumnType.entries()].filter(([, t]) => t !== 'central').map(([k]) => k);
+                        const lateralLengths = lateralKeys.map(k => perColumnLength.get(k));
+                        const lateralsMatch = lateralLengths.length === 0 ||
+                            lateralLengths.every(l => Math.abs(l - lateralLengths[0]) <= 1e-12);
+                        if (centralKeys.length <= 1 && lateralsMatch) {
+                            const centralLength = centralKeys.length ? perColumnLength.get(centralKeys[0]) : 0;
+                            const centralCount = centralKeys.length ? perColumnCount.get(centralKeys[0]) : 0;
+                            const lateralLength = lateralKeys.length ? perColumnLength.get(lateralKeys[0]) : 0;
+                            const lateralCount = lateralKeys.length ? perColumnCount.get(lateralKeys[0]) : 0;
+                            seriesGapLength = centralLength + lateralLength;
+                            gapsInPath = centralCount + lateralCount;
+                        }
+                    }
+                }
+
+                if (seriesGapLength != null) {
+                    const seriesAux = formatDimension(seriesGapLength);
+                    data.push({
+                        parameter: 'Gap in the Flux Path',
+                        value: `${removeTrailingZeroes(seriesAux.label, 3)} ${seriesAux.unit}`
+                    });
+                    data.push({ parameter: 'Gaps in the Flux Path', value: String(gapsInPath) });
+                }
+
+                const aux = formatDimension(sumOfGaps);
+                data.push({
+                    parameter: 'Sum of All Gaps',
+                    value: `${removeTrailingZeroes(aux.label, 3)} ${aux.unit}`
+                });
                 data.push({ parameter: 'Number of Gaps', value: nonResidualGaps.length.toString() });
             }
             

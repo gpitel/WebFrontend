@@ -132,8 +132,75 @@ export default {
     },
     getInsulationType() { return this.localData.insulationType; },
 
+        // A flyback's secondaries all share one core, so only the MAIN rail's (voltage, ratio) pair is
+        // free — it fixes the reflected voltage Vor. Every other rail's ratio then follows from its
+        // own voltage: n_i = Vor / (|V_i| + Vd). Keep those in step automatically, so the common case
+        // is right without the user having to compute anything (ABT #914). A ratio the user edits
+        // DELIBERATELY is left alone — turns are integers in practice, so accepting a slightly
+        // different rail voltage is a legitimate choice — and updateErrorMessage() then reports the
+        // discrepancy rather than silently designing something else.
+        onOutputParameterUpdate(event, index) {
+            const rails = this.localData.outputsParameters;
+            const dimension = event?.dimension;
+            const vd = Number(this.localData.diodeVoltageDrop) || 0;
+            const vor0 = Number(rails[0]?.turnsRatio) * (Math.abs(Number(rails[0]?.voltage)) + vd);
+
+            if (vor0 > 0) {
+                // Changing THIS rail's voltage re-derives THIS rail's ratio; changing the main rail's
+                // voltage or ratio moves Vor, so every dependent rail follows.
+                if (dimension === 'voltage' && index > 0) {
+                    this.deriveTurnsRatio(index, vor0, vd);
+                }
+                else if (index === 0 && (dimension === 'voltage' || dimension === 'turnsRatio')) {
+                    for (let i = 1; i < rails.length; i++) this.deriveTurnsRatio(i, vor0, vd);
+                }
+            }
+            this.updateErrorMessage();
+        },
+        deriveTurnsRatio(index, vor0, vd) {
+            const rail = this.localData.outputsParameters[index];
+            const denominator = Math.abs(Number(rail.voltage)) + vd;
+            if (!(denominator > 0)) return;
+            // 2 decimals: the engine rounds provided ratios the same way.
+            rail.turnsRatio = Math.round((vor0 / denominator) * 100) / 100;
+        },
         updateErrorMessage() {
             this.errorMessage = "";
+
+            // Every secondary of a flyback shares one core, so the rails are NOT independent: each
+            // turns ratio must satisfy n_i*(|V_i| + Vd) = Vor, the same reflected voltage for all of
+            // them. In "I know the design I want" the user supplies BOTH the rail voltage and the
+            // ratio, and the engine honours the ratio (req::provided_turns_ratio) — so an
+            // inconsistent pair silently designs a DIFFERENT converter than the one described.
+            //
+            // That is what a user hit (ABT #914): `turnsRatio` defaults to 8 and updateNumberOutputs
+            // copies the previous rail's values, so four rails all carried 8. Their entered voltages
+            // were ignored and every winding came out at the same ~10.5 V — the "5 V" rail included.
+            // Say so instead of quietly building it.
+            if (this.localData.designLevel != 'I know the design I want') return;
+
+            const rails = this.localData.outputsParameters;
+            if (!rails?.length) return;
+            const vd = Number(this.localData.diodeVoltageDrop) || 0;
+            const reflected = (r) => Number(r.turnsRatio) * (Math.abs(Number(r.voltage)) + vd);
+            const vor0 = reflected(rails[0]);
+            if (!(vor0 > 0)) return;
+
+            for (let i = 1; i < rails.length; i++) {
+                const vorI = reflected(rails[i]);
+                if (!(vorI > 0)) continue;
+                // 2% is well inside what rounding the ratio to 2 decimals can explain.
+                if (Math.abs(vorI - vor0) / vor0 <= 0.02) continue;
+                // What this rail will ACTUALLY be, given the ratio the engine will use.
+                const actual = vor0 / Number(rails[i].turnsRatio) - vd;
+                this.errorMessage =
+                    `Output ${i + 1}: a turns ratio of ${rails[i].turnsRatio} makes this rail ` +
+                    `${actual.toFixed(2)} V, not the ${rails[i].voltage} V entered. All secondaries ` +
+                    `share one core, so every ratio must give the same reflected voltage as Output 1 ` +
+                    `(${vor0.toFixed(1)} V). Use ${(vor0 / (Math.abs(Number(rails[i].voltage)) + vd)).toFixed(2)} ` +
+                    `for ${rails[i].voltage} V.`;
+                return;
+            }
         },
         updateNumberOutputs(newNumber) {
             if (newNumber > this.localData.outputsParameters.length) {
@@ -445,6 +512,7 @@ export default {
           :units="['V', 'A', null]"
           :mins="[minimumMaximumScalePerParameter['voltage']['min'], minimumMaximumScalePerParameter['current']['min'], 0.01]"
           :maxs="[minimumMaximumScalePerParameter['voltage']['max'], minimumMaximumScalePerParameter['current']['max'], 100]"
+          :allowNegatives="[true, false, false]"
           v-model="localData.outputsParameters[index]"
           :dataTestLabel="dataTestLabel + '-OutputsParameters'"
           :labelWidthProportionClass="'col-4'"
@@ -454,7 +522,7 @@ export default {
           :labelBgColor="'transparent'"
           :valueBgColor="$styleStore.wizard.inputValueBgColor"
           :textColor="$styleStore.wizard.inputTextColor"
-          @update="updateErrorMessage"
+          @update="onOutputParameterUpdate($event, index)"
         />
         <PairOfDimensions v-else
           :names="['voltage', 'current']"
@@ -462,6 +530,7 @@ export default {
           :units="['V', 'A']"
           :mins="[minimumMaximumScalePerParameter['voltage']['min'], minimumMaximumScalePerParameter['current']['min']]"
           :maxs="[minimumMaximumScalePerParameter['voltage']['max'], minimumMaximumScalePerParameter['current']['max']]"
+          :allowNegatives="[true, false]"
           v-model="localData.outputsParameters[index]"
           :dataTestLabel="dataTestLabel + '-OutputsParameters'"
           :labelWidthProportionClass="'col-4'"

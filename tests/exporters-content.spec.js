@@ -5,7 +5,7 @@
  * and validates structural markers:
  *   - MAS JSON: valid JSON with magnetic/inputs/outputs keys
  *   - LTspice: .cir with .SUBCKT, or .asy with Version + SYMATTR/PIN
- *   - NgSpice netlist: contains .subckt / .model / .include
+ *   - NgSpice netlist: requested from MKF in the NgSpice dialect, contains .subckt
  *   - SIMBA payload: >100 bytes
  *
  * Reach strategy:
@@ -31,8 +31,11 @@ const ss = (page, name) => screenshot(page, 'exporters-content', name);
 
 async function goToRoute(page, routePath, { timeout = 45000 } = {}) {
   await page.goto(`${BASE_URL}${routePath}`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  // A data route first renders, then redirects through /engine_loader, then
+  // returns; "not on the loader" is already true before that round trip, and a
+  // MAS injected then is wiped when the route remounts. Wait for the engine.
   await page.waitForFunction(
-    () => !window.location.pathname.includes('engine_loader'),
+    () => window.__omEngineReady === true && !window.location.pathname.includes('engine_loader'),
     null,
     { timeout },
   );
@@ -118,7 +121,11 @@ test.describe('Exporter content — MAS JSON', () => {
 
     expect(dl.filename).toMatch(/\.json$/i);
     const parsed = JSON.parse(dl.body);
-    expect('magnetic' in parsed || 'inputs' in parsed || 'outputs' in parsed).toBe(true);
+    // The first entry is "only with magnetic": a MAS Magnetic document, the magnetic
+    // alone ({core, coil, ...}, ABT #1388); the others are full MAS files.
+    const magnetic = 'magnetic' in parsed ? parsed.magnetic : parsed;
+    expect(magnetic.core, 'the download carries the core').toBeTruthy();
+    expect(magnetic.coil, 'the download carries the coil').toBeTruthy();
     await ss(page, 'MAS1-json-valid');
   });
 });
@@ -172,12 +179,27 @@ test.describe('Exporter content — NgSpice', () => {
     await setupCompleteMagnetic(page);
     await openModal(page, 'Circuit-Simulators-exports-modal-button');
 
+    // Record which simulator dialect the exporter asks MKF for. Both dialects
+    // contain a .subckt, so the body markers alone cannot tell an LTspice
+    // model offered as an ngspice file from the real thing (ABT #1226).
+    await page.evaluate(() => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+      window.__subcircuitExports = [];
+      pinia._s.get('taskQueue').$onAction(({ name, args, after }) => {
+        if (name !== 'exportMagneticAsSubcircuit') return;
+        after((result) => window.__subcircuitExports.push({ simulator: args[2], result }));
+      });
+    });
+
     const btn = await findNgSpiceButton(page);
     expect(btn).not.toBeNull();
     const dl = await downloadToString(page, btn, 15000);
 
-    expect(dl.body.length).toBeGreaterThan(50);
-    expect(dl.body).toMatch(/\.subckt|\.model|\.include/i);
+    const exports = await page.evaluate(() => window.__subcircuitExports);
+    expect(exports.map(e => e.simulator)).toEqual(['NgSpice']);
+    expect(dl.body).toBe(exports[0].result);
+    expect(dl.body).not.toMatch(/^Exception/);
+    expect(dl.body).toMatch(/\.subckt/i);
     await ss(page, 'NG1-downloaded');
   });
 });

@@ -84,27 +84,44 @@ export default {
             }
             return Array.from({length: 12}, (_, i) => i + 1);
         },
+        // Full, untruncated names, for the title attribute. Web bug report #172, "For
+        // inductor design, input for Temp is missing": it is not missing, it is called
+        // "Operating Temperature" and the responsive shortener was rendering it as
+        // "Opera. Tempe." -- at which point nobody scanning for "Temp" finds it. The
+        // shortening below is still useful on a narrow window, but a truncated word must
+        // always be recoverable by hovering, and it must stay recognisable.
+        fullLabels() {
+            const fullLabels = {"numberWindings": "Number of Windings"};
+            designRequirementsOrdered[this.$stateStore.getCurrentApplication()].forEach((value) => {
+                fullLabels[value] = toTitleCase(value);
+            })
+            return fullLabels
+        },
         shortenedLabels() {
             const shortenedLabels = {"numberWindings": "No. Windings"};
             designRequirementsOrdered[this.$stateStore.getCurrentApplication()].forEach((value) => {
                 var label = value;
                 if (window.innerWidth < 1200 && label.length > 10) {
-                    var slice = 3;
-                    if (window.innerWidth <= 768) {
-                        slice = 8;
+                    // Never cut a word below 6 characters. The old ladder went down to 3,
+                    // which turned "Operating Temperature" into "Ope. Tem." and
+                    // "Magnetizing Inductance" into "Mag. Ind." -- unreadable, and chosen
+                    // from window.innerWidth rather than from how much room the label
+                    // actually has (measured on production: the label box was 203 px wide
+                    // while showing "Numbe. Windi.").
+                    var slice = 8;
+                    if (window.innerWidth >= 850 && window.innerWidth < 970) {
+                        slice = 6;
                     }
-                    else{
-                        if (window.innerWidth >= 850 && window.innerWidth < 970) {
-                            slice = 5;
-                        }
-                        if (window.innerWidth >= 970 && window.innerWidth < 1200) {
-                            slice = 7;
-                        }
+                    else if (window.innerWidth >= 970 && window.innerWidth < 1200) {
+                        slice = 7;
                     }
 
                     label = toTitleCase(label).split(' ')
-                        .map(item => item.length < slice? item + ' ' : item.slice(0, slice) + '. ')
+                        .map(item => item.length <= slice? item + ' ' : item.slice(0, slice) + '. ')
                         .join('')
+                }
+                else {
+                    label = toTitleCase(label);
                 }
                 shortenedLabels[value] = label;
             })
@@ -138,26 +155,58 @@ export default {
     },
     mounted () {
         this.masStore.$subscribe((mutation, state) => {
-            this.$emit("canContinue", this.canContinue(state));
+            this.emitCanContinue(state);
         })
-        this.$emit("canContinue", this.canContinue(this.masStore));
+        this.emitCanContinue(this.masStore);
 
 
     },
     methods: {
-        canContinue(store){
-            var canContinue = store.mas.inputs.designRequirements.magnetizingInductance != null;
-            canContinue &= store.mas.inputs.designRequirements.name != '';
-            canContinue &= store.mas.inputs.designRequirements.magnetizingInductance.minimum != null ||
-                           store.mas.inputs.designRequirements.magnetizingInductance.nominal != null ||
-                           store.mas.inputs.designRequirements.magnetizingInductance.maximum != null;
-            for (var index in store.mas.inputs.designRequirements.turnsRatios) {
-                canContinue &= store.mas.inputs.designRequirements.turnsRatios[index].minimum != null ||
-                               store.mas.inputs.designRequirements.turnsRatios[index].nominal != null ||
-                               store.mas.inputs.designRequirements.turnsRatios[index].maximum != null;
+        emitCanContinue(store) {
+            // The Continue button used to receive a bare boolean, so when it
+            // flipped to "Fix Errors" the user had no way to find out WHICH
+            // requirement was incomplete. Send the reasons along with the
+            // verdict; the sidebar renders them under Actions.
+            const errors = this.validationErrors(store);
+            this.$emit("canContinue", errors.length == 0, errors);
+        },
+        // Every reason the Continue button is blocked, as user-facing text.
+        // Derived from the store on each mutation, so it can never go stale.
+        validationErrors(store) {
+            const errors = [];
+            const designRequirements = store.mas.inputs.designRequirements;
 
+            if (designRequirements.name == '') {
+                errors.push("The design has no name. Give it one at the top of the Configuration panel.");
             }
-            return Boolean(canContinue);
+
+            if (designRequirements.magnetizingInductance == null) {
+                errors.push("Magnetizing Inductance is required. Add it from the Requirements list on the left.");
+            }
+            else if (designRequirements.magnetizingInductance.minimum == null &&
+                     designRequirements.magnetizingInductance.nominal == null &&
+                     designRequirements.magnetizingInductance.maximum == null) {
+                errors.push("Magnetizing Inductance has no value. Set a minimum, nominal or maximum.");
+            }
+
+            for (var index in designRequirements.turnsRatios) {
+                const turnsRatio = designRequirements.turnsRatios[index];
+                if (turnsRatio.minimum == null && turnsRatio.nominal == null && turnsRatio.maximum == null) {
+                    errors.push("Turns ratio for " + this.windingLabel(store, Number(index) + 1) +
+                                " has no value. Set a minimum, nominal or maximum.");
+                }
+            }
+
+            return errors;
+        },
+        // Name the winding the way the turns-ratio rows label it, so the error
+        // text points at a row the user can actually see.
+        windingLabel(store, windingIndex) {
+            const winding = store.mas.magnetic.coil.functionalDescription[windingIndex];
+            if (winding != null && winding.name != null) {
+                return winding.name;
+            }
+            return toTitleCase(isolationSideOrdered[windingIndex]);
         },
         requirementButtonClicked(requirementName) {
             if (this.masStore.mas.inputs.designRequirements[requirementName] == null) {
@@ -224,7 +273,11 @@ export default {
             }
         },
         hasError() {
-            this.$emit("canContinue", false);
+            // A child input rejected its own value (out of order, empty, <= 0).
+            // The child renders the detail inline in red; the store never took
+            // the bad value, so validationErrors() cannot see it. Say where to
+            // look rather than blocking with a silent button.
+            this.$emit("canContinue", false, ["A requirement has an invalid value. Check the fields marked in red in the Configuration panel."]);
         },
         updatedIsolationSides(value, index) {
             this.masStore.mas.magnetic.coil.functionalDescription[index].isolationSide = value;
@@ -329,6 +382,7 @@ export default {
                             'dr-req-item-required': compulsoryRequirements[$stateStore.getCurrentApplication()].includes(requirementName)
                          }">
                         <label v-tooltip="tooltipsMagneticSynthesisDesignRequirements[requirementName]"
+                               :title="fullLabels[requirementName]"
                                class="dr-req-label">{{ toTitleCase(shortenedLabels[requirementName]) }}</label>
                         <button
                             :data-cy="dataTestLabel + '-' + toPascalCase(requirementName) + '-add-remove-button'"
