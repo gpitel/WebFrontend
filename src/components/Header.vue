@@ -30,6 +30,7 @@ export default {
         const authStore = useAuthStore();
         const cloudDesignStore = useCloudDesignStore();
         const loading = false;
+        const loadingMasFileName = null;
         const bugReporterVisible = false;
         const accountModalVisible = false;
         // Grouped wizard menu — keeps the header dropdown compact by hiding
@@ -107,6 +108,7 @@ export default {
             authStore,
             cloudDesignStore,
             loading,
+            loadingMasFileName,
             bugReporterVisible,
             accountModalVisible,
             savingToCloud: false,
@@ -133,6 +135,14 @@ export default {
             startTourForContext(this.$route.name, this.$stateStore);
         },
         closeDropdowns() { this.openDropdown = null; this.navCollapseOpen = false; },
+        // A click inside a menu or on the toggler must not close it. Their @click.stop is not enough:
+        // Vue drops a handler for an event stamped before the handler was attached, and a wall
+        // clock that steps back (NTP, WSL time sync) makes a fresh click look older than that.
+        closeDropdownsOnOutsideClick(event) {
+            if (event.target instanceof Element && event.target.closest('#header_wrapper') &&
+                (event.target.closest('.nav-item.dropdown') || event.target.closest('.navbar-toggler'))) return;
+            this.closeDropdowns();
+        },
         async onNewPowerMagneticDesign() {
             this.$stateStore.resetMagneticTool();
             this.$stateStore.selectWorkflow("design");
@@ -223,10 +233,21 @@ export default {
                 await this.$router.push(`${import.meta.env.BASE_URL}engine_loader`);
         },
         load() {
-            this.loading = true;
             this.$refs.masFileReader.click();
         },
         readMASFile(event) {
+            // Keep the element: the load navigates away and can unmount this header,
+            // after which this.$refs.masFileReader is null.
+            const input = this.$refs['masFileReader'];
+            const file = input.files.item(0);
+            if (file == null) {
+                return;
+            }
+            // Loading waits for the engine (its catalogues are needed to check and
+            // complete the design), which on a first visit can take a minute. Say so
+            // the whole time, or picking a file looks like it did nothing.
+            this.loading = true;
+            this.loadingMasFileName = file.name;
             const fr = new FileReader();
 
             fr.onload = async (e) => {
@@ -260,9 +281,12 @@ export default {
                     window.alert(`Could not load this file: ${reason}`);
                 } finally {
                     this.loading = false;
+                    this.loadingMasFileName = null;
+                    // Let the same file be picked again (an unchanged input fires no change).
+                    input.value = '';
                 }
             };
-            fr.readAsText(this.$refs['masFileReader'].files.item(0), "ISO-8859-1");
+            fr.readAsText(file, "ISO-8859-1");
         },
         onLoggedIn() {
             // Post-login hook: settings sync starts lazily from main.js watcher.
@@ -275,6 +299,11 @@ export default {
             }
             this.cloudDesignStore.unlink();
             this.openDropdown = null;
+        },
+        async saveCurrentDesignAs() {
+            // "Save as…" asks for a name: open My Designs with the save-as input ready.
+            this.openDropdown = null;
+            await this.$router.push(`${import.meta.env.BASE_URL}designs?saveAs=1`);
         },
         async saveCurrentDesignToCloud() {
             // Quick-save from the header: updates the linked design, or sends
@@ -334,7 +363,7 @@ export default {
         };
         this.$styleStore.setTheme(theme);
 
-        this._closeDropdownsBound = this.closeDropdowns.bind(this);
+        this._closeDropdownsBound = this.closeDropdownsOnOutsideClick.bind(this);
         document.addEventListener('click', this._closeDropdownsBound);
 
         // The header is position:fixed, so page content clears it with a top
@@ -384,7 +413,7 @@ export default {
                 class="navbar-toggler om-toggler"
                 ref="headerToggler"
                 type="button"
-                @click="navCollapseOpen = !navCollapseOpen"
+                @click.stop="navCollapseOpen = !navCollapseOpen"
                 aria-controls="navbarNavDropdown"
                 :aria-expanded="navCollapseOpen ? 'true' : 'false'"
                 aria-label="Toggle navigation">
@@ -555,6 +584,16 @@ export default {
                                     {{ cloudDesignStore.isLinked ? `Save "${cloudDesignStore.name}"` : 'Save design to account' }}
                                 </button>
                             </li>
+                            <li v-if="$stateStore.isAnyDesignLoaded()">
+                                <button
+                                    data-cy="Header-save-as-design-button"
+                                    class="dropdown-item nav-link w-100 px-2"
+                                    title="Save the current design as a new design with another name"
+                                    @click="saveCurrentDesignAs"
+                                >
+                                    <i class="mr-2 pi pi-copy"></i>Save design as…
+                                </button>
+                            </li>
                             <li>
                                 <router-link
                                     data-cy="Header-my-designs-link"
@@ -664,12 +703,30 @@ export default {
         </div>
     </nav>
 
+    <div v-if="loadingMasFileName != null" class="om-mas-loading" role="status" data-cy="Header-Load-MAS-progress">
+        <i class="pi pi-spin pi-spinner me-2"></i>Loading {{ loadingMasFileName }}: waiting for the engine and checking the design…
+    </div>
+
     <!-- Modal -->
     <BugReporterModal v-model:visible="bugReporterVisible"/>
     <AccountModal v-model:visible="accountModalVisible" @logged-in="onLoggedIn"/>
 </template>
 
 <style>
+    .om-mas-loading {
+        position: fixed;
+        top: 5rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1100;
+        max-width: calc(100vw - 32px);
+        padding: 0.6rem 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--p-primary);
+        background: var(--p-dark);
+        color: var(--p-light);
+        box-shadow: 0 4px 16px rgba(var(--p-black-rgb), 0.35);
+    }
 
     html {
       position: relative;

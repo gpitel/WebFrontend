@@ -49,11 +49,16 @@ export default {
         return {
             // Which signal the user drives for an inductor; the other is derived.
             inductorDrivenBy: 'current',
+            // What MKF says of the voltage as it stands (e.g. not volt-second balanced); '' when it takes it.
+            voltageIssue: '',
             masStore,
             taskQueueStore,
         }
     },
     computed: {
+        currentWindingName() {
+            return this.masStore.mas.magnetic.coil.functionalDescription[this.currentWindingIndex].name;
+        },
         isInductor() {
             return this.masStore.mas.inputs.designRequirements.turnsRatios.length === 0;
         },
@@ -78,6 +83,8 @@ export default {
         },
     },
     watch: {
+        currentOperatingPointIndex() { this.checkVoltageSoon(); },
+        currentWindingIndex() { this.checkVoltageSoon(); },
     },
     created () {
 
@@ -87,7 +94,11 @@ export default {
             if (action.name == "updatedInputExcitationProcessed") {
                 this.$emit('updatedSignal');
             }
+            if (action.name == "updatedInputExcitationProcessed" || action.name == "updatedInputExcitationWaveformUpdatedFromProcessed") {
+                this.checkVoltageSoon();
+            }
         })
+        this.checkVoltageSoon();
         // For inductors, ensure voltage is consistent with current on mount.
         // Use a longer delay on mount to let WASM initialize and process existing data.
         if (this.isInductor && this.hasInductance) {
@@ -103,8 +114,39 @@ export default {
     },
     beforeUnmount() {
         if (this._autoInduceTimer) clearTimeout(this._autoInduceTimer);
+        if (this._checkVoltageTimer) clearTimeout(this._checkVoltageTimer);
     },
     methods: {
+        // Debounced: the voltage's waveform is rebuilt from its processed data after each edit.
+        checkVoltageSoon() {
+            if (this._checkVoltageTimer) clearTimeout(this._checkVoltageTimer);
+            this._checkVoltageTimer = setTimeout(() => {
+                this._checkVoltageTimer = null;
+                this.checkVoltage();
+            }, 500);
+        },
+        // MKF is the judge of a voltage: it is asked for the magnetizing current the voltage
+        // imposes (Faraday), and what it refuses is shown next to the voltage. The current it
+        // returns is not stored: this only checks.
+        async checkVoltage() {
+            const excitation = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex]?.excitationsPerWinding[this.currentWindingIndex];
+            if (excitation?.voltage?.waveform == null || !this.hasInductance) {
+                this.voltageIssue = '';
+                return;
+            }
+            const checked = JSON.stringify(excitation.voltage.waveform) + excitation.frequency;
+            let issue = '';
+            try {
+                const magnetizingInductance = await this.taskQueueStore.resolveDimensionWithTolerance(this.masStore.mas.inputs.designRequirements.magnetizingInductance, 'the magnetizing inductance in Design Requirements');
+                await this.taskQueueStore.calculateInducedCurrent(deepCopy(excitation), magnetizingInductance);
+            } catch (error) {
+                issue = String(error?.message ?? error).replace(/^Exception:\s*/, '');
+            }
+            const current = this.masStore.mas.inputs.operatingPoints[this.currentOperatingPointIndex]?.excitationsPerWinding[this.currentWindingIndex];
+            if (current?.voltage?.waveform != null && JSON.stringify(current.voltage.waveform) + current.frequency === checked) {
+                this.voltageIssue = issue;
+            }
+        },
         // Web bug report #169. Flip which signal the user drives, and immediately derive the
         // other one so the pair never sits inconsistent.
         setInductorDrivenBy(signalDescriptor) {
@@ -239,7 +281,7 @@ export default {
                 <div class="opm-card opm-card-current" :class="{ 'opm-disabled': currentIsDerived }">
                     <div class="opm-card-header">
                         <i class="pi pi-volume-up"></i>
-                        <span>Current waveform</span>
+                        <span :data-cy="dataTestLabel + '-current-card-title'">Current through {{ currentWindingName }}</span>
                     </div>
                     <div class="opm-card-body">
                         <WaveformInput
@@ -270,7 +312,7 @@ export default {
                 <div class="opm-card opm-card-voltage" :class="{ 'opm-disabled': voltageIsDerived }">
                     <div class="opm-card-header">
                         <i class="pi pi-bolt"></i>
-                        <span>Voltage waveform</span>
+                        <span :data-cy="dataTestLabel + '-voltage-card-title'">Voltage across {{ currentWindingName }}'s terminals</span>
                     </div>
                     <div v-if="isInductor" class="opm-derived-note">
                         <template v-if="voltageIsDerived">
@@ -309,6 +351,10 @@ export default {
                             @updatedData="masStore.updatedInputExcitationWaveformUpdatedFromProcessed('voltage')"
                             @induce="induce('current')"
                         />
+                    </div>
+                    <div v-if="voltageIssue != ''" class="opm-issue" role="alert" :data-cy="dataTestLabel + '-voltage-issue'">
+                        <i class="pi pi-exclamation-triangle"></i>
+                        <span>{{ voltageIssue }}</span>
                     </div>
                 </div>
 
@@ -442,6 +488,20 @@ export default {
     border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.25);
 }
 
+.opm-issue {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin: 0 0.75rem 0.75rem;
+    padding: 0.4rem 0.6rem;
+    background: rgb(var(--p-danger-rgb) / 0.12);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.4);
+    border-radius: 8px;
+    color: var(--p-danger);
+    font-size: 0.78rem;
+    line-height: 1.3;
+}
+
 .opm-link-btn {
     background: none;
     border: 0;
@@ -457,6 +517,11 @@ export default {
 .opm-disabled {
     opacity: 0.5;
     pointer-events: none;
+}
+
+/* The note of a derived signal holds the button that hands the signal back to the user. */
+.opm-disabled .opm-derived-note {
+    pointer-events: auto;
 }
 
 .opm-card-header {

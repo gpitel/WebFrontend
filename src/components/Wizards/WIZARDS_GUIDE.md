@@ -8,6 +8,17 @@ The reference implementation is **`DabWizard.vue`** (golden standard). The
 **`ConverterWizardBase.vue`**, which provides the layout, waveform
 orchestration, MAS-store wiring, navigation helpers and SPICE-code generation.
 
+> **Where the converter models live now (2026-10, ABT #1233).** Converter design,
+> waveforms and ngspice decks moved from MKF to **Kirchhoff**. Wizards reach them
+> through `waitForKirchhoff()` (`WebSharedComponents/assets/js/kirchhoffRuntime.js`),
+> which reshapes Kirchhoff's `process_converter` / `design_tas` output into the
+> contract this guide describes; MKF's `src/converter_models/` now holds only
+> `KirchhoffBridge`. Read every `MKF/src/converter_models/<X>.{h,cpp}` path below as
+> `Kirchhoff/src/<X>.{hpp,cpp}` (e.g. `Ahb.cpp`, `Dab.cpp`, `Flyback.cpp`), and every
+> "rebuild libMKF / WebLibMKF" step for a converter change as a libKirchhoff rebuild
+> (`src/assets/js/libKirchhoff.js`). The CMC/DMC flows run on Kirchhoff too. MKF stays
+> authoritative for the magnetics themselves.
+
 ---
 
 ## 0. Hard rules (read first, no exceptions)
@@ -355,7 +366,7 @@ a stale chart on toggle.
   <template #design-mode>     <!-- radio: Help-me vs I-know (omit only for chokes / PFC) -->
   <template #design-or-switch-parameters-title v-if="...I know...">
   <template #design-or-switch-parameters     v-if="...I know...">
-  <template #col1-footer>     <!-- Review Specs / Design Magnetic buttons -->
+  <template #col1-footer="{ resultsStale }">  <!-- Review Specs / Design Magnetic buttons -->
   <template #input-voltage>   <!-- CompactVoltageInput -->
   <template #outputs>         <!-- numberOutputs + Pair/TripleOfDimensions per output -->
   <template #diagnostics v-if="<name>Diagnostics">   <!-- DimensionReadOnly rows -->
@@ -592,7 +603,7 @@ still contain the raw camelCase key, not the pretty label.
 | `design-or-switch-parameters-title` | Title row above the I-know panel. |
 | `design-or-switch-parameters` | Turns ratio, magnetizing/series inductance, rectifier type, etc. |
 | `conditions` | Operating conditions (freq, mode, temp, efficiency, insulation). |
-| `col1-footer` | Action buttons + error text. Use `action-btn-sm`, `action-btn-sm primary` / `secondary`, `error-text` classes. |
+| `col1-footer` | Action buttons + error text. Use `action-btn-sm`, `action-btn-sm primary` / `secondary`, `error-text` classes. Slot props: `catalogMode`, `resultsStale`. **Required:** the Design Magnetic button carries `data-cy="wizard-design-magnetic-button"` and `:disabled="errorMessage != '' \|\| resultsStale"` (ABT #1520). `resultsStale` is true while the waveforms/diagnostics on screen come from a run whose `buildParams('analytical')` key differs from the current inputs, or while the latest run threw; the base then shows `data-cy="wizard-results-stale-banner"` and greys the waveforms and the Diagnostics card. It only works if every run goes through `executeWaveformAction` and `buildParams()` depends on inputs alone — never write a run's results back into the inputs it reads, or the wizard reads as stale after every run (`tests/wizards/stale-results.spec.js` sweeps every catalog wizard for that). |
 | `input-voltage` | The input-voltage card. Use `CompactVoltageInput`. Hide the entire card with `:showInputVoltage="false"`. |
 | `outputs` | Number-of-outputs selector + per-output rows. Hide with `:showNumberOutputs="false"` for single-output wizards. |
 | `diagnostics` | `DimensionReadOnly` rows. Convention: cache results in `<name>Diagnostics` data field; highlight bad margins with `:textColor="value <= 0 ? 'text-warning' : ..."`. |

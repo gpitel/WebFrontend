@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { waitForMkf, isWorkerMode } from 'WebSharedComponents/assets/js/mkfRuntime'
+import { waitForMkf, isWorkerMode, updateEngineSettings, queueEngineSettingsTask } from 'WebSharedComponents/assets/js/mkfRuntime'
 // Converter design + ngspice simulation moved from webMKF (magnetics-only now) to webKirchhoff.
 // In the converter wizard methods below, the `mkf` local is the webKirchhoff proxy (waitForKirchhoff),
 // NOT the magnetics module. Its proxy accepts the legacy per-topology function names
@@ -14,6 +14,7 @@ import { assertValidMas } from 'WebSharedComponents/assets/js/masValidator.js'
 import { clean } from 'WebSharedComponents/assets/js/utils'
 import { unitSystem } from 'WebSharedComponents/assets/js/units.js'
 import { useInventoryStore, ENGINE_HAS_CONTEXT_ADVISERS } from '../stores/inventory'
+import { requireAdviserExcitations, requireCoreAdviseMode } from 'WebSharedComponents/assets/js/adviserInputs.js'
 
 // MAS sentry. Validates an outgoing payload against the generated MAS schema
 // (via quicktype's `Convert.to*`) before we hand it to the WASM. Loud failure
@@ -148,6 +149,21 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             return materialData;
         },
 
+        // Core losses of one operating point with the core exactly as given (its material included),
+        // for the loader's comparison of a stored material copy with the library's
+        // (services/coreMaterialFreshness.js). Not the builder's calculateCoreLosses: nothing listens
+        // to this one, so it never lands in the builder's displays.
+        async calculateCoreLossesForMaterialCheck(core, coil, inputs, modelsData, operatingPointIndex) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.calculate_core_losses(JSON.stringify(core), JSON.stringify(coil), JSON.stringify(inputs), JSON.stringify(modelsData), operatingPointIndex);
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
+        },
+
         coreTemperatureDependantParametersGotten(success = true, dataOrMessage = '') {
         },
 
@@ -183,6 +199,26 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             return masResult;
         },
 
+        magneticAutocompleted(success = true, dataOrMessage = '') {
+        },
+
+        // Completes a magnetic on its own (core processed, wires and bobbin resolved), without
+        // the inputs: what is left to do for a design whose operating points MKF refuses.
+        async magneticAutocomplete(magnetic, settings = {}) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            masSentry('magneticAutocomplete', 'Magnetic', magnetic);
+            const result = await mkf.magnetic_autocomplete(JSON.stringify(magnetic), JSON.stringify(settings));
+            if (result.startsWith('Exception')) {
+                setTimeout(() => { this.magneticAutocompleted(false, result); }, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const magneticResult = JSON.parse(result);
+            setTimeout(() => { this.magneticAutocompleted(true, magneticResult); }, this.task_standard_response_delay);
+            return magneticResult;
+        },
+
         // ==========================================
         // Settings Methods
         // ==========================================
@@ -211,24 +247,38 @@ export const useTaskQueueStore = defineStore('taskQueue', {
          * The wire standard follows the profile unit system (ABT #1110): IEC 60317
          * under SI, NEMA MW 1000 C under imperial. The magnetic and core advisers
          * wind their candidates with MKF's coil adviser, which only offers wires of
-         * the engine's preferred standard, so it is pushed before every advise.
+         * the engine's preferred standard, so it is set for every advise: inside the
+         * settings queue, together with the advise call itself, so no other settings
+         * writer can put the other standard back in between (ABT #1660).
          */
-        async applyPreferredWireStandard(mkf) {
-            const settings = JSON.parse(await mkf.get_settings());
-            if (!('preferredWireStandard' in settings)) {
-                throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
-            }
+        withPreferredWireStandard(mkf, engineCall) {
             const wanted = unitSystem() === 'imperial' ? 'NEMA MW 1000 C' : 'IEC 60317';
-            if (settings.preferredWireStandard === wanted) return;
-            settings.preferredWireStandard = wanted;
-            await mkf.set_settings(JSON.stringify(settings));
+            return updateEngineSettings(mkf, (settings) => {
+                if (!('preferredWireStandard' in settings)) {
+                    throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
+                }
+                settings.preferredWireStandard = wanted;
+            }, engineCall);
         },
 
         async setSettings(settings) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            await mkf.set_settings(JSON.stringify(settings));
+            await queueEngineSettingsTask(() => mkf.set_settings(JSON.stringify(settings)));
+            setTimeout(() => { this.settingsSet(true, settings); }, this.task_standard_response_delay);
+            return settings;
+        },
+
+        /**
+         * Change some engine settings without overwriting anyone else's: `change`
+         * sets its fields on the current settings (see updateEngineSettings).
+         */
+        async updateSettings(change) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const settings = await updateEngineSettings(mkf, change);
             setTimeout(() => { this.settingsSet(true, settings); }, this.task_standard_response_delay);
             return settings;
         },
@@ -243,74 +293,14 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         async calculateAdvisedCores(inputs, weights, count, mode) {
             const mkf = await waitForMkf();
             await mkf.ready;
-            await this.applyPreferredWireStandard(mkf);
 
-            // Deep-clone so sanitization below never mutates the caller's MAS store
+            // Deep-clone so nothing below mutates the caller's MAS store
             inputs = JSON.parse(JSON.stringify(inputs));
 
-            // Ensure mode is a valid string
-            let modeString = String(mode);
-            // Fix case where mode is "[object Object]" due to JS object corruption
-            if (modeString === '[object Object]' || !['available cores', 'standard cores', 'custom cores', 'hybrid cores'].includes(modeString)) {
-                console.warn('[DEBUG calculateAdvisedCores] Invalid mode detected:', modeString, '- resetting to "standard cores"');
-                modeString = 'standard cores';
-            }
-            console.log('[DEBUG calculateAdvisedCores] mode:', modeString);
-            console.log('[DEBUG calculateAdvisedCores] weights:', weights);
-            console.log('[DEBUG calculateAdvisedCores] count:', count);
-
-            // Validate and fix frequency before calling WASM
-            // Frequency must be a reasonable value (1 Hz to 100 MHz range)
-            // Values outside this range are likely uninitialized/garbage
-            const DEFAULT_FREQUENCY = 100000; // 100 kHz default
-            const MIN_VALID_FREQUENCY = 1; // 1 Hz minimum
-            const MAX_VALID_FREQUENCY = 100000000; // 100 MHz maximum
-            if (inputs.operatingPoints && inputs.operatingPoints.length > 0) {
-                inputs.operatingPoints.forEach((op, opIndex) => {
-                    if (op.excitationsPerWinding && op.excitationsPerWinding.length > 0) {
-                        op.excitationsPerWinding.forEach((exc, excIndex) => {
-                            const freq = exc.frequency;
-                            if (!freq || !Number.isFinite(freq) || freq < MIN_VALID_FREQUENCY || freq > MAX_VALID_FREQUENCY) {
-                                console.warn(`[DEBUG calculateAdvisedCores] Invalid frequency=${freq} in operating point ${opIndex}, excitation ${excIndex}. Set to ${DEFAULT_FREQUENCY}`);
-                                exc.frequency = DEFAULT_FREQUENCY;
-                            }
-                        });
-                    }
-                });
-            }
-
-            // Sanitize harmonics and waveforms before sending to WASM.
-            // calculate_buck_inputs returns zero-freq harmonics and null-padded waveform
-            // time arrays for some operating points; strip them before WASM validation.
-            if (inputs.operatingPoints) {
-                inputs.operatingPoints.forEach((op) => {
-                    if (op.excitationsPerWinding) {
-                        op.excitationsPerWinding.forEach((exc) => {
-                            for (const signal of ['current', 'voltage']) {
-                                if (!exc[signal]) continue;
-                                if (exc[signal].harmonics) {
-                                    const sanitized = this._sanitizeHarmonics(exc[signal].harmonics);
-                                    if (this._hasValidHarmonics(sanitized)) {
-                                        exc[signal].harmonics = sanitized;
-                                    } else {
-                                        delete exc[signal].harmonics;
-                                    }
-                                }
-                                const waveform = exc[signal].waveform;
-                                if (waveform?.time) {
-                                    const firstNull = waveform.time.indexOf(null);
-                                    if (firstNull === 0) {
-                                        delete exc[signal].waveform;
-                                    } else if (firstNull > 0) {
-                                        waveform.time = waveform.time.slice(0, firstNull);
-                                        if (waveform.data) waveform.data = waveform.data.slice(0, firstNull);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                });
-            }
+            // Bad inputs throw, naming the operating point and winding, instead
+            // of being rewritten to a default the user never chose (ABT #1417).
+            const modeString = requireCoreAdviseMode(mode);
+            requireAdviserExcitations(inputs);
 
             masSentry('calculateAdvisedCores', 'Inputs', inputs);
             // Inventory scoping: with scope 'only', run against the account
@@ -329,10 +319,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
                     // fail loudly instead.
                     throw new Error("Adviser scope is 'only my inventory' but your inventory could not be loaded into the engine — sign in again or reload the page (see console for the original error).");
                 }
-                result = await mkf.calculate_advised_cores_with_context(
-                    JSON.stringify(inputs), JSON.stringify(weights), count, modeString, '{}', true);
+                result = await this.withPreferredWireStandard(mkf, () => mkf.calculate_advised_cores_with_context(
+                    JSON.stringify(inputs), JSON.stringify(weights), count, modeString, '{}', true));
             } else {
-                result = await mkf.calculate_advised_cores(JSON.stringify(inputs), JSON.stringify(weights), count, modeString);
+                result = await this.withPreferredWireStandard(mkf, () => mkf.calculate_advised_cores(JSON.stringify(inputs), JSON.stringify(weights), count, modeString));
             }
             if (result.startsWith('Exception')) {
                 setTimeout(() => { this.advisedCoresCalculated(false, result); }, this.task_standard_response_delay);
@@ -349,9 +339,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         async calculateAdvisedMagnetics(inputs, weights, count, mode) {
             const mkf = await waitForMkf();
             await mkf.ready;
-            await this.applyPreferredWireStandard(mkf);
 
-            // Deep-clone so sanitization below never mutates the caller's MAS store
+            // Deep-clone so nothing below mutates the caller's MAS store
             inputs = JSON.parse(JSON.stringify(inputs));
 
             // Transform weights keys from UPPERCASE to Title Case for MKF compatibility
@@ -376,59 +365,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
                 transformedWeights[transformedKey] = value;
             }
             
-            // Ensure mode is a valid string
-            let modeString = String(mode);
-            // Fix case where mode is "[object Object]" due to JS object corruption
-            if (modeString === '[object Object]' || !['available cores', 'standard cores', 'custom cores', 'hybrid cores'].includes(modeString)) {
-                modeString = 'standard cores';
-            }
-
-            // Validate and fix frequency before calling WASM
-            const DEFAULT_FREQUENCY = 100000; // 100 kHz default
-            if (inputs.operatingPoints && inputs.operatingPoints.length > 0) {
-                inputs.operatingPoints.forEach((op, opIndex) => {
-                    if (op.excitationsPerWinding && op.excitationsPerWinding.length > 0) {
-                        op.excitationsPerWinding.forEach((exc, excIndex) => {
-                            if (!exc.frequency || exc.frequency <= 0) {
-                                exc.frequency = DEFAULT_FREQUENCY;
-                            }
-                        });
-                    }
-                });
-            }
-
-            // Sanitize harmonics and waveforms before sending to WASM.
-            // calculate_buck_inputs can return zero-freq harmonics and null-padded waveform
-            // time arrays for some operating points; strip them before WASM validation.
-            if (inputs.operatingPoints) {
-                inputs.operatingPoints.forEach((op) => {
-                    if (op.excitationsPerWinding) {
-                        op.excitationsPerWinding.forEach((exc) => {
-                            for (const signal of ['current', 'voltage']) {
-                                if (!exc[signal]) continue;
-                                if (exc[signal].harmonics) {
-                                    const sanitized = this._sanitizeHarmonics(exc[signal].harmonics);
-                                    if (this._hasValidHarmonics(sanitized)) {
-                                        exc[signal].harmonics = sanitized;
-                                    } else {
-                                        delete exc[signal].harmonics;
-                                    }
-                                }
-                                const waveform = exc[signal].waveform;
-                                if (waveform?.time) {
-                                    const firstNull = waveform.time.indexOf(null);
-                                    if (firstNull === 0) {
-                                        delete exc[signal].waveform;
-                                    } else if (firstNull > 0) {
-                                        waveform.time = waveform.time.slice(0, firstNull);
-                                        if (waveform.data) waveform.data = waveform.data.slice(0, firstNull);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                });
-            }
+            // Bad inputs throw, naming the operating point and winding, instead
+            // of being rewritten to a default the user never chose (ABT #1417).
+            const modeString = requireCoreAdviseMode(mode);
+            requireAdviserExcitations(inputs);
 
             masSentry('calculateAdvisedMagnetics', 'Inputs', inputs);
             // Inventory scoping — see calculateAdvisedCores.
@@ -441,10 +381,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
                 if (!inventoryStore.engineContextLoaded) {
                     throw new Error("Adviser scope is 'only my inventory' but your inventory could not be loaded into the engine — sign in again or reload the page (see console for the original error).");
                 }
-                result = await mkf.calculate_advised_magnetics_with_context(
-                    JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString, '{}', true);
+                result = await this.withPreferredWireStandard(mkf, () => mkf.calculate_advised_magnetics_with_context(
+                    JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString, '{}', true));
             } else {
-                result = await mkf.calculate_advised_magnetics(JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString);
+                result = await this.withPreferredWireStandard(mkf, () => mkf.calculate_advised_magnetics(JSON.stringify(inputs), JSON.stringify(transformedWeights), count, modeString));
             }
             if (result.startsWith('Exception')) {
                 setTimeout(() => { this.advisedMagneticsCalculated(false, result); }, this.task_standard_response_delay);
@@ -929,6 +869,13 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
             masSentry('exportMagneticAsSymbol', 'Magnetic', magnetic);
             const result = await mkf.export_magnetic_as_symbol(JSON.stringify(magnetic), format, extra);
+            // MKF writes symbols only for some simulators and answers "" for the rest; an
+            // empty file offered as a symbol is a silent failure (ABT #1233).
+            if (typeof result !== 'string' || result.startsWith('Exception') || result.trim() === '') {
+                const reason = typeof result === 'string' && result.startsWith('Exception') ? result : `MKF returned no ${format} symbol`;
+                setTimeout(() => { this.magneticExportedAsSymbol(false, reason); }, this.task_standard_response_delay);
+                throw new Error(reason);
+            }
             setTimeout(() => { this.magneticExportedAsSymbol(true, result); }, this.task_standard_response_delay);
             return result;
         },
@@ -2274,16 +2221,19 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         cmcInputsCalculated(success = true, dataOrMessage = '') {
         },
 
-        async calculateCmcInputs(params) {
-            const mkf = await waitForKirchhoff();
-            await mkf.ready;
+        // CMC design lives in webKirchhoff (design_cmc; its proxy maps the legacy
+        // calculate_cmc_inputs names). The CMC wizard's analytical path runs through here.
+        async calculateCmcInputs(params, { advanced = false } = {}) {
+            const kirchhoff = await waitForKirchhoff();
+            await kirchhoff.ready;
 
-            const result = await mkf.calculate_cmc_inputs(JSON.stringify(params));
-            if (result.startsWith('Exception')) {
+            const fn = advanced ? 'calculate_advanced_cmc_inputs' : 'calculate_cmc_inputs';
+            const result = await kirchhoff[fn](JSON.stringify(params));
+            if (typeof result === 'string' && result.startsWith('Exception')) {
                 setTimeout(() => { this.cmcInputsCalculated(false, result); }, this.task_standard_response_delay);
                 throw new Error(result);
             }
-            const inputs = JSON.parse(result);
+            const inputs = typeof result === 'string' ? JSON.parse(result) : result;
             setTimeout(() => { this.cmcInputsCalculated(true, inputs); }, this.task_standard_response_delay);
             return inputs;
         },
@@ -2296,20 +2246,6 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             await mkf.ready;
 
             const result = await mkf.simulate_cmc_ideal_waveforms(JSON.stringify(params), inductance, parasiticCap_pF, dvdt_V_ns);
-            if (result.startsWith('Exception')) {
-                setTimeout(() => { this.cmcWaveformsSimulated(false, result); }, this.task_standard_response_delay);
-                throw new Error(result);
-            }
-            const waveforms = JSON.parse(result);
-            setTimeout(() => { this.cmcWaveformsSimulated(true, waveforms); }, this.task_standard_response_delay);
-            return waveforms;
-        },
-
-        async simulateCmcLisnWaveforms(params, inductance) {
-            const mkf = await waitForKirchhoff();
-            await mkf.ready;
-
-            const result = await mkf.simulate_cmc_lisn_waveforms(JSON.stringify(params), inductance);
             if (result.startsWith('Exception')) {
                 setTimeout(() => { this.cmcWaveformsSimulated(false, result); }, this.task_standard_response_delay);
                 throw new Error(result);
@@ -2341,20 +2277,6 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         },
 
         dmcAttenuationVerified(success = true, dataOrMessage = '') {
-        },
-
-        async verifyDmcAttenuation(params, inductance, capacitance = 0) {
-            const mkf = await waitForKirchhoff();
-            await mkf.ready;
-
-            const result = await mkf.verify_dmc_attenuation(JSON.stringify(params), inductance, capacitance);
-            if (result.startsWith('Exception')) {
-                setTimeout(() => { this.dmcAttenuationVerified(false, result); }, this.task_standard_response_delay);
-                throw new Error(result);
-            }
-            const verificationResults = JSON.parse(result);
-            setTimeout(() => { this.dmcAttenuationVerified(true, verificationResults); }, this.task_standard_response_delay);
-            return verificationResults;
         },
 
         dmcDesignProposed(success = true, dataOrMessage = '') {
@@ -2538,12 +2460,5 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         coresLoaded(success = true, dataOrMessage = '') {
         },
 
-        async loadCores(data, allowToroidal, useOnlyInStock) {
-            const mkf = await waitForMkf();
-            await mkf.ready;
-
-            await mkf.load_cores(data, allowToroidal, useOnlyInStock);
-            setTimeout(() => { this.coresLoaded(true); }, this.task_standard_response_delay);
-        },
     }
 });

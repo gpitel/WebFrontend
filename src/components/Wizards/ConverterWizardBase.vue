@@ -2,6 +2,7 @@
 import ConverterWaveformVisualizer from './ConverterWaveformVisualizer.vue'
 import { recordDesign } from 'WebSharedComponents/assets/js/telemetry.js'
 import { useTaskQueueStore } from '../../stores/taskQueue'
+import { toTitleCase } from 'WebSharedComponents/assets/js/utils.js'
 /**
  * ConverterWizardBase - Base layout + common logic for all converter wizards.
  * Child wizards access common methods via this.$refs.base.methodName().
@@ -159,7 +160,33 @@ export default {
     'dismiss-error',
   ],
 
+  // Inputs that rejected what the user typed (user report #188). A rejected value is
+  // never written to the wizard's data, so the wizard would design with the previous
+  // value while the field shows the typed one. Each input reports here; while any is
+  // rejected its reason is shown and the actions are disabled.
+  provide() {
+    return {
+      reportWizardInputValidity: (inputName, message) => {
+        const rejected = { ...this.rejectedInputs };
+        if (message) rejected[inputName] = message;
+        else delete rejected[inputName];
+        this.rejectedInputs = rejected;
+      },
+    };
+  },
+
   computed: {
+    rejectedInputMessage() {
+      const entries = Object.entries(this.rejectedInputs);
+      if (entries.length === 0) return '';
+      return entries.map(([inputName, message]) => `${toTitleCase(inputName)}: ${message}`).join(' ');
+    },
+    shownErrorMessage() {
+      return this.rejectedInputMessage || this.errorMessage;
+    },
+    actionsDisabled() {
+      return this.disableActions || this.rejectedInputMessage !== '';
+    },
     // A wizard that produces its own converter traces wins; otherwise use the ones we fetched
     // lazily from component_waveforms when the user opened the converter view (KH ABT #905).
     effectiveConverterWaveforms() {
@@ -199,7 +226,26 @@ export default {
     },
     col3Class() {
       return `col-12 col-xl-${this.col3Width}`;
-    }
+    },
+    /**
+     * Why the results on screen do not answer for the current inputs:
+     *   'failed'  — the latest run threw; what is shown comes from an earlier run;
+     *   'changed' — an input differs from the inputs of the run that produced them;
+     *   ''        — they are current (or nothing is shown yet).
+     */
+    resultsStaleReason() {
+      // Re-evaluate whenever results are replaced or a run fails.
+      if (this.resultsRunId === 0) return '';
+      const wi = this._resultsWizard;
+      if (!wi) throw new Error('ConverterWizardBase: results were recorded without the wizard that produced them');
+      const showsResults = (wi.magneticWaveforms?.length > 0) || (wi.simulatedOperatingPoints?.length > 0);
+      if (!showsResults) return '';
+      if (this.lastRunError) return 'failed';
+      return this.currentParamsKey(wi) === this.resultsParamsKey ? '' : 'changed';
+    },
+    resultsStale() {
+      return this.resultsStaleReason !== '';
+    },
   },
 
   data() {
@@ -217,10 +263,36 @@ export default {
       lazyConverterWaveforms: [],
       loadingConverterWaveforms: false,
       converterWaveformsError: '',
+      // Stale-results tracking (ABT #1520). The wizard keeps the last run's waveforms and
+      // diagnostics on screen after an input changes or a run throws; without a marker a user
+      // reads them as the answer for the inputs they now see (a 3.3 kW LLC showing the 330 W
+      // run's secondary current). `resultsParamsKey` is the same JSON.stringify(buildParams
+      // ('analytical')) key processWizardData keys the stored run on (ABT #1368/#1370);
+      // `lastRunError` is set while the latest run threw. The wizard whose results are shown is
+      // kept on `this._resultsWizard` (a component proxy must not go into reactive data), and
+      // `resultsRunId` is bumped with it so the computed below re-evaluates.
+      resultsRunId: 0,
+      resultsParamsKey: null,
+      lastRunError: '',
+      rejectedInputs: {},
     };
   },
 
   methods: {
+
+    /**
+     * The key of the wizard's CURRENT inputs, comparable with the key a run was stamped with
+     * (see executeWaveformAction / processWizardData). Returns null when the current inputs
+     * cannot be assembled at all (buildParams throws on an incomplete edit): no run can have
+     * answered for inputs that do not exist, so the caller treats null as "changed".
+     */
+    currentParamsKey(wi) {
+      try {
+        return JSON.stringify(wi.buildParams('analytical'));
+      } catch (e) {
+        return null;
+      }
+    },
 
     // ===================================================================
     // CENTRALIZED WAVEFORM ORCHESTRATION
@@ -237,6 +309,7 @@ export default {
       this.converterTas = null;
       this.lazyConverterWaveforms = [];
       this.converterWaveformsError = '';
+      this._resultsWizard = wizard;
 
       try {
         const aux = wizard.buildParams(mode);
@@ -279,6 +352,10 @@ export default {
       } catch (error) {
         console.error(`Error in ${mode} waveform action:`, error);
         wizard.waveformError = error.message || `Failed to get ${mode} waveforms`;
+        // Whatever is still on screen came from an earlier run: mark it, never let it pass
+        // for the answer to the inputs that just failed (ABT #1520).
+        this.lastRunError = wizard.waveformError;
+        this.resultsRunId += 1;
       }
 
       wizard.simulatingWaveforms = false;
@@ -426,6 +503,11 @@ export default {
       wizardInstance.magneticWaveforms = processed.magneticWaveforms;
       wizardInstance.converterWaveforms = processed.converterWaveforms;
       this.converterTas = processed.converterTas ?? null;
+      // The results on screen now answer for `paramsKey` (ABT #1520).
+      this._resultsWizard = wizardInstance;
+      this.resultsParamsKey = paramsKey;
+      this.lastRunError = '';
+      this.resultsRunId += 1;
       
       // Assign to masStore inputs
       this.assignResultsToMasStore(wizardInstance, processed);
@@ -1241,8 +1323,8 @@ export default {
     </slot>
 
     <!-- Top-level Error Message (dismissible) -->
-    <div v-if="errorMessage" class="alert alert-danger alert-dismissible fade show py-2 mt-3" role="alert" style="font-size: 0.85rem;">
-      <i class="pi pi-exclamation-circle mr-2"></i>{{ errorMessage }}
+    <div v-if="shownErrorMessage" class="alert alert-danger alert-dismissible fade show py-2 mt-3" role="alert" style="font-size: 0.85rem;" data-cy="ConverterWizard-error-message">
+      <i class="pi pi-exclamation-circle mr-2"></i>{{ shownErrorMessage }}
       <button type="button" class="btn-close btn-close-sm" @click="onDismissError"></button>
     </div>
 
@@ -1280,8 +1362,10 @@ export default {
           </div>
           </div>
         </div>
-        <!-- Footer area below col1 (actions, inline error, etc.) -->
-        <slot name="col1-footer" :catalogMode="catalogMode">
+        <!-- Footer area below col1 (actions, inline error, etc.).
+             resultsStale: the results on screen do not answer for the current inputs; wizards
+             disable "Design Magnetic" on it until a new run (ABT #1520). -->
+        <slot name="col1-footer" :catalogMode="catalogMode" :resultsStale="resultsStale">
           <!-- Wizard can place action buttons here -->
         </slot>
       </div>
@@ -1309,9 +1393,12 @@ export default {
           </div>
 
           <!-- Diagnostics (optional): topology-specific read-only diagnostic rows. -->
-          <div v-if="$slots.diagnostics" class="compact-card">
-            <div class="compact-header"><i class="pi pi-chart-line mr-1"></i>Diagnostics</div>
-            <div class="compact-body pl-4 pr-3">
+          <div v-if="$slots.diagnostics" class="compact-card" data-cy="wizard-diagnostics-card">
+            <div class="compact-header d-flex justify-content-between align-items-center">
+              <span><i class="pi pi-chart-line mr-1"></i>Diagnostics</span>
+              <span v-if="resultsStale" class="results-stale-tag" data-cy="wizard-diagnostics-stale-tag">Out of date</span>
+            </div>
+            <div class="compact-body pl-4 pr-3" :class="{ 'results-stale': resultsStale }" data-cy="wizard-diagnostics-body">
               <slot name="diagnostics"></slot>
             </div>
           </div>
@@ -1357,7 +1444,7 @@ export default {
                   <slot name="waveform-controls">
                     <button
                       class="sim-btn analytical"
-                      :disabled="disableActions || simulatingWaveforms"
+                      :disabled="actionsDisabled || simulatingWaveforms"
                       @click="onGetAnalyticalWaveforms"
                       title="Get analytical waveforms"
                     >
@@ -1368,7 +1455,7 @@ export default {
                     </button>
                     <button
                       class="sim-btn simulated"
-                      :disabled="disableActions || simulatingWaveforms"
+                      :disabled="actionsDisabled || simulatingWaveforms"
                       @click="onGetSimulatedWaveforms"
                       title="Simulate ideal waveforms"
                     >
@@ -1380,7 +1467,7 @@ export default {
                     <button
                       v-if="showSpiceCodeButton"
                       class="sim-btn spice"
-                      :disabled="disableActions || spiceCodeLoading"
+                      :disabled="actionsDisabled || spiceCodeLoading"
                       @click="onGetSpiceCode"
                       title="Get SPICE netlist for external simulation"
                     >
@@ -1397,18 +1484,31 @@ export default {
               <div v-if="waveformError" class="error-text mb-2">
                 <i class="pi pi-exclamation-circle mr-1"></i>{{ waveformError }}
               </div>
-              <slot name="waveforms">
-                <ConverterWaveformVisualizer
-                  :magneticWaveforms="magneticWaveforms"
-                  :converterWaveforms="effectiveConverterWaveforms"
-                  :converterAvailable="!!converterTas"
-                  :converterLoading="loadingConverterWaveforms"
-                  :converterError="converterWaveformsError"
-                  :viewMode="waveformViewMode"
-                  @update:viewMode="setWaveformViewMode"
-                  :forceUpdate="waveformForceUpdate"
-                />
-              </slot>
+              <div
+                v-if="resultsStale"
+                class="results-stale-banner mb-2"
+                role="status"
+                data-cy="wizard-results-stale-banner"
+                :data-stale-reason="resultsStaleReason"
+              >
+                <i class="pi pi-exclamation-triangle mr-1"></i>
+                <span v-if="resultsStaleReason === 'failed'">The last run failed — the results below are from an earlier run. Fix the inputs and run again.</span>
+                <span v-else>Inputs changed — run again to update these results.</span>
+              </div>
+              <div class="d-flex flex-column flex-grow-1" :class="{ 'results-stale': resultsStale }" data-cy="wizard-waveforms-results">
+                <slot name="waveforms">
+                  <ConverterWaveformVisualizer
+                    :magneticWaveforms="magneticWaveforms"
+                    :converterWaveforms="effectiveConverterWaveforms"
+                    :converterAvailable="!!converterTas"
+                    :converterLoading="loadingConverterWaveforms"
+                    :converterError="converterWaveformsError"
+                    :viewMode="waveformViewMode"
+                    @update:viewMode="setWaveformViewMode"
+                    :forceUpdate="waveformForceUpdate"
+                  />
+                </slot>
+              </div>
             </div>
           </div>
 
@@ -1558,6 +1658,11 @@ export default {
 
 /* Error text */
 .error-text { color: var(--p-danger); font-size: 0.8rem; }
+
+/* Results that no longer answer for the current inputs (ABT #1520) */
+.results-stale { opacity: 0.4; filter: grayscale(1); transition: opacity 0.15s ease, filter 0.15s ease; }
+.results-stale-banner { background: rgb(from var(--p-warning) r g b / 0.12); border: 1px solid rgb(from var(--p-warning) r g b / 0.5); border-radius: 6px; color: var(--p-warning); font-size: 0.8rem; font-weight: 500; padding: 6px 10px; }
+.results-stale-tag { color: var(--p-warning); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
 
 /* Form check */
 .form-check-label.small { font-size: 0.75rem; }

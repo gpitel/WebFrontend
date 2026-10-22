@@ -11,7 +11,6 @@ import DimensionWithTolerance from 'WebSharedComponents/DataInput/DimensionWithT
 import { defaultDesignRequirements, minimumMaximumScalePerParameter, isolationSideOrdered } from 'WebSharedComponents/assets/js/defaults.js'
 import ConverterWizardBase from './ConverterWizardBase.vue'
 import EmiSpectrumView from './EmiSpectrumView.vue'
-import { waitForKirchhoff } from 'WebSharedComponents/assets/js/kirchhoffRuntime'
 import CompactVoltageInput from './CompactVoltageInput.vue'
 import { tooltipsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
@@ -202,7 +201,8 @@ export default {
             //
             // parasiticCap_pF / dvdt_V_ns are ALWAYS forwarded — the
             // backend uses them for the operating-point CM current
-            // (I_cm = C·dV/dt) in every spec mode, so analytical and
+            // (the switch-node CM current at the excitation frequency, from
+            // C_par, dV/dt and the bus voltage) in every spec mode, so analytical and
             // simulated always see the same excitation. They only
             // influence the L spec when the user hasn't provided an
             // explicit impedance or insertion-loss requirement.
@@ -240,17 +240,7 @@ export default {
         },
         getCalculateFn() {
             const isAdvanced = this.localData.designLevel === 'I know the design I want';
-            return async (aux) => {
-                // CMC design moved to webKirchhoff (design_cmc; the proxy maps the legacy
-                // calculate_cmc_inputs alias) — the magnetics-only webMKF no longer has it.
-                const Module = await waitForKirchhoff();
-                await Module.ready;
-                const fn = isAdvanced ? 'calculate_advanced_cmc_inputs' : 'calculate_cmc_inputs';
-                const raw = await Module[fn](JSON.stringify(aux));
-                if (typeof raw === 'string' && raw.startsWith('Exception:'))
-                    throw new Error(raw);
-                return typeof raw === 'string' ? JSON.parse(raw) : raw;
-            };
+            return (aux) => this.taskQueueStore.calculateCmcInputs(aux, { advanced: isAdvanced });
         },
         getSimulateFn() {
             return async (aux) => {
@@ -729,7 +719,7 @@ export default {
         :textColor="$styleStore.wizard.inputTextColor"
         @update="updateErrorMessage"
       />
-      <!-- The CM noise source (I_cm = C·dV/dt) is ALWAYS sent to the backend — it sets
+      <!-- The CM noise source (C_par, dV/dt) is ALWAYS sent to the backend — it sets
            the operating point's excitation amplitude (thermal sizing) in EVERY spec
            mode, so keep it visible/editable whenever the noise-estimation panel
            (which owns these same fields) isn't showing it. -->
@@ -764,7 +754,7 @@ export default {
     <!-- ══════════════════════════════════════════════════════════ -->
     <!-- SLOT: #col1-footer — action buttons (identical to Buck)   -->
     <!-- ══════════════════════════════════════════════════════════ -->
-    <template #col1-footer>
+    <template #col1-footer="{ resultsStale }">
       <div class="d-flex align-items-center justify-content-between mt-2">
         <span v-if="errorMessage" class="error-text">
           <i class="pi pi-exclamation-triangle mr-1"></i>{{ errorMessage }}
@@ -779,7 +769,7 @@ export default {
           >
             <i class="pi pi-search mr-1"></i>Review Specs
           </button>
-          <button :disabled="errorMessage != ''" class="action-btn-sm primary" @click="processAndAdvise">
+          <button data-cy="wizard-design-magnetic-button" :title="resultsStale ? 'These results are out of date: run again before designing the magnetic' : undefined" :disabled="errorMessage != '' || resultsStale" class="action-btn-sm primary" @click="processAndAdvise">
             <i class="pi pi-sparkles mr-1"></i>{{ catalogMode ? 'Find Magnetic' : 'Design Magnetic' }}
           </button>
         </div>

@@ -21,7 +21,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './_coverage.js';
-import { BASE_URL, screenshot, pause } from './utils.js';
+import { BASE_URL, screenshot } from './utils.js';
+import { installActivityProbe, activityMark, waitForIdle, waitForActionSince } from './utils/activity.js';
 
 // ABT #929: repo-relative, not '/home/alf/...'. These only ever resolved on one machine.
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -144,7 +145,9 @@ async function reachMagneticTool(page, { reloads = 1 } = {}) {
 async function goToMagneticTool(page) {
   await reachMagneticTool(page);
   await waitForVueApp(page);
-  await pause(page, 800, 'mechanical: settle');
+  // ABT #929: was a fixed 800 ms. Wait for the tool's boot work (engine calls, store actions)
+  // to actually finish, so the next step does not race it.
+  await waitForIdle(page, { label: 'the magnetic tool boot', timeout: 30000 });
 }
 
 // ABT #929: selecting the builder pushes /engine_loader on purpose — main.js calls it the
@@ -232,8 +235,13 @@ async function injectMas(page, fixturePath, { heal = true, mountFirst = false } 
     // is why a different subset failed on every run. Re-assert the selection while
     // waiting instead of asserting it once and hoping.
     await waitForBuilderMounted(page, selectBuilderState);
+    // ABT #929: the store existing means the builder has STARTED mounting, not that its
+    // mount-time design reset is done. Injecting before that reset ran let it land after us and
+    // throw the fixture away. Wait for the mount's own work to finish, then inject.
+    await waitForIdle(page, { label: 'the builder mount', timeout: 30000 });
   }
 
+  const beforeInjection = await activityMark(page);
   await page.evaluate(([parsedMas, healFlag]) => {
     const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
     const mas = pinia._s.get('mas');
@@ -259,7 +267,12 @@ async function injectMas(page, fixturePath, { heal = true, mountFirst = false } 
     await selectBuilderState(page);
   }
 
-  await pause(page, 2500, 'mechanical: settle');
+  // ABT #929: was a fixed 2.5 s. The builder reacts to the injected design with a chain of
+  // actions (check-and-fix, autocomplete, core processing, the normalization re-wind, the
+  // simulations). Several callers then waited on a predicate the FIXTURE already satisfied
+  // (e.g. "two conduction sections"), so they went on while that chain was still running and a
+  // late re-wind overwrote what the test did next. Wait for the chain itself.
+  await waitForIdle(page, { since: beforeInjection, label: 'the builder\'s reaction to the injected design', timeout: 45000 });
   return parsed;
 }
 
@@ -309,6 +322,12 @@ test.describe('Winding Studio P0', () => {
   // lighter sibling specs — not the 180 s I tried earlier, which only hid how long failures took.
   test.describe.configure({ timeout: 90000 });
 
+  // ABT #929: every wait on "the builder has finished reacting" reads this probe; it is an init
+  // script, so it has to be in before the test's first navigation. Its waits carry their own
+  // timeouts, sized (like the ones above) to expire inside the test budget so the in-flight
+  // actions they report are actually printed.
+  test.beforeEach(async ({ page }) => { await installActivityProbe(page); });
+
   test('WS-1 studio toggle renders turns and sections for the classic wound coil', async ({ page }) => {
     const parsed = JSON.parse(fs.readFileSync(CLASSIC_FIXTURE, 'utf-8'));
     await goToMagneticTool(page);
@@ -339,7 +358,6 @@ test.describe('Winding Studio P0', () => {
 
     const firstTurn = studio.locator('.winding-studio-turn').first();
     await firstTurn.hover({ force: true });
-    await pause(page, 200, 'mechanical: hover settle');
 
     const tooltip = studio.locator('.winding-studio-tooltip');
     await expect(tooltip).toBeVisible({ timeout: 3000 });
@@ -447,7 +465,6 @@ test.describe('Winding Studio P0', () => {
     // the injected fixture through its own (columns-aware) wind machinery,
     // and the drag below must be able to CHANGE the result.
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
 
     // Wait for the builder's normalization rewind to settle: secondary wound
@@ -482,7 +499,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(180000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
 
     // Normalization: both windings in window 0, adjacent sections.
@@ -537,7 +553,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(180000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
 
     await page.waitForFunction(() => {
@@ -582,11 +597,31 @@ test.describe('Winding Studio P0', () => {
     await ss(page, 'ws7-margin-resized');
   });
 
+  test('WS-7b builder: a bottom margin larger than the window is refused', async ({ page }) => {
+    // The bottom-margin field used to check the TOP margin against the window, so an
+    // oversized bottom margin was accepted while a valid one could be refused.
+    test.setTimeout(180000);
+    await goToMagneticTool(page);
+    await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
+    const insulationButton = page.locator('button').filter({ hasText: /^\s*Insulation\s*$/ }).first();
+    await expect(insulationButton).toBeVisible({ timeout: 30000 });
+    await insulationButton.click();
+
+    const bottomMargin = page.locator('[data-cy$="-BottomOrRightMargin-number-input"] input').first();
+    await expect(bottomMargin).toBeVisible({ timeout: 10000 });
+    await bottomMargin.focus();
+    await bottomMargin.press('Control+a');
+    await bottomMargin.pressSequentially('900');
+    await bottomMargin.press('Enter');
+    await expect(page.locator('[data-cy$="-BottomOrRightMarginErrorMessage"]').first())
+      .toHaveText('Margin is larger than winding window', { timeout: 30000 });
+    await expect(page.locator('[data-cy$="-TopOrLeftMarginErrorMessage"]').first()).toHaveText('');
+  });
+
   test('WS-8 builder: custom section rectangle — shrink height, winder re-flows into 2 layers', async ({ page }) => {
     test.setTimeout(180000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
 
     await page.waitForFunction(() => {
@@ -668,11 +703,15 @@ test.describe('Winding Studio P0', () => {
     const boundary = studio.locator('[data-cy$="-WindingStudio-boundary"]').first();
     await expect(boundary).toBeVisible({ timeout: 5000 });
     const bBox = await boundary.boundingBox();
+    const beforeRewind = await activityMark(page);
     await page.mouse.move(bBox.x + bBox.width / 2, bBox.y + bBox.height / 2);
     await page.mouse.down();
     await page.mouse.move(bBox.x + bBox.width / 2 + 12, bBox.y + bBox.height / 2, { steps: 5 });
     await page.mouse.up();
-    await pause(page, 4000, 'mechanical: full re-wind settles');
+    // ABT #929: was a fixed 4 s. The full re-wind is a `wind` action: wait for one to complete
+    // after the drag, then for everything it sets off to finish.
+    await waitForActionSince(page, beforeRewind, 'magneticBuilderTaskQueue.wind', { timeout: 60000 });
+    await waitForIdle(page, { since: beforeRewind, label: 'the full re-wind', timeout: 60000 });
 
     const rewound = await primaryState();
     expect(rewound.height).toBeLessThan(before.height * 0.7);   // pin survived
@@ -872,7 +911,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(180000);
     await goToMagneticTool(page);
     await injectMas(page, CATALOG_BOBBIN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
 
     const coilState = () => page.evaluate(() => {
@@ -955,7 +993,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(240000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
 
     const conductionSections = () => page.evaluate(() => {
@@ -1031,7 +1068,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(240000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
@@ -1057,13 +1093,44 @@ test.describe('Winding Studio P0', () => {
     await expect(overlay).not.toBeVisible({ timeout: 5000 });
   });
 
+  // ABT #1420: real winding changes how the coil is WOUND, so turning it on must re-wind
+  // the design (with connection blocking), not only redraw the ideal layout.
+  test('WS-RW1 builder: turning real winding on re-winds the coil with the engine flag on', async ({ page }) => {
+    test.setTimeout(240000);
+    await goToMagneticTool(page);
+    await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
+    await page.waitForFunction(() => {
+      const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
+      return (pinia?._s.get('mas')?.mas?.magnetic?.coil?.turnsDescription?.length ?? 0) > 0;
+    }, null, { timeout: 60000 });
+    // ABT #929: was a fixed 3 s. A mount-time wind still running when the spy below goes in
+    // would be counted as the re-wind the toggle caused.
+    await waitForIdle(page, { label: 'the mount-time winds', timeout: 60000 });
+
+    await page.evaluate(() => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+      window.__rewind = { winds: 0, engineFlag: null };
+      pinia._s.get('magneticBuilderTaskQueue').$onAction(({ name, after }) => {
+        if (name !== 'wind') return;
+        after(async () => {
+          const settings = await pinia._s.get('taskQueue').getSettings();
+          window.__rewind.winds += 1;
+          window.__rewind.engineFlag = settings.coilUseRealWindingGeometry;
+        });
+      });
+      pinia._s.get('settings').magneticBuilderSettings.useRealWindingGeometry = true;
+    });
+
+    await page.waitForFunction(() => window.__rewind.winds > 0 && window.__rewind.engineFlag != null, null, { timeout: 120000 });
+    expect(await page.evaluate(() => window.__rewind.engineFlag), 'the engine winds with real winding on').toBe(true);
+  });
+
   // Per-window sections layout: the window gear applies orientation/alignment
   // to THAT window's bobbin entry and re-winds.
   test('WS-16 builder: window gear sets sections orientation for the window', async ({ page }) => {
     test.setTimeout(240000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
@@ -1080,7 +1147,9 @@ test.describe('Winding Studio P0', () => {
     await expect(menu).not.toBeVisible({ timeout: 3000 });
 
     // The window entry carries the new orientation and the re-wound sections
-    // stack along y (contiguous) instead of x.
+    // stack along y (contiguous) instead of x. Both rest on the bobbin barrel:
+    // their INNER edges (x - width/2) sit on the window's inner side. Their
+    // centres differ when their layer counts differ (MKF dece26ff, ABT #1646).
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
       if (pinia == null) return false;   // ABT #929: not mounted yet — poll again, do not throw
@@ -1091,7 +1160,10 @@ test.describe('Winding Studio P0', () => {
         return false;
       }
       const [a, b] = conduction;
-      return Math.abs(a.coordinates[0] - b.coordinates[0]) < 1e-6
+      const windowInnerSide = window0.coordinates[0] - window0.width / 2;
+      const innerEdge = (section) => section.coordinates[0] - section.dimensions[0] / 2;
+      return Math.abs(innerEdge(a) - windowInnerSide) < 1e-6
+        && Math.abs(innerEdge(b) - windowInnerSide) < 1e-6
         && Math.abs(a.coordinates[1] - b.coordinates[1]) > 1e-4;
     }, null, { timeout: 90000 });
     await ss(page, 'ws16-window-contiguous');
@@ -1103,7 +1175,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(240000);
     await goToMagneticTool(page);
     await injectMas(page, TOROIDAL_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
@@ -1200,7 +1271,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(240000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
@@ -1270,7 +1340,6 @@ test.describe('Winding Studio P0', () => {
     } finally {
       fs.unlinkSync(fixturePath);
     }
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
@@ -1349,7 +1418,6 @@ test.describe('Winding Studio P0', () => {
   // into ONE history entry, and back() lands on the pre-gesture state.
   test('WS-19 history coalesces same-gesture entries into one undo step', async ({ page }) => {
     await goToMagneticTool(page);
-    await pause(page, 1500, 'mechanical: builder settle');
     const result = await page.evaluate(async () => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
@@ -1413,7 +1481,6 @@ test.describe('Winding Studio P0', () => {
     } finally {
       fs.unlinkSync(fixturePath);
     }
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;
@@ -1495,7 +1562,6 @@ test.describe('Winding Studio P0', () => {
     test.setTimeout(240000);
     await goToMagneticTool(page);
     await injectMas(page, MULTICOLUMN_FIXTURE, { heal: false, mountFirst: true });
-    await pause(page, 2000, 'mechanical: builder settle after injection');
     const studio = await openStudio(page);
     await page.waitForFunction(() => {
       const pinia = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia;

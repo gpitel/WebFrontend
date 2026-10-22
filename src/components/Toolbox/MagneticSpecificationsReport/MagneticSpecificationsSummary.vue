@@ -222,7 +222,7 @@ export default {
 
             if (this.masStore.mas.inputs.designRequirements.turnsRatios.length > 0){
                 text +=`
-                                \\multicolumn{4}{|l|}{\\textbf{Turns ratios}}\\\\ 
+                                \\multicolumn{4}{|l|}{\\textbf{Turns ratios ($N_p/N_s$)}}\\\\ 
                                 \\hline`;
                 const primaryWindingName = this.masStore.mas.magnetic.coil.functionalDescription[0].name;
 
@@ -416,7 +416,7 @@ export default {
                 operatingPoint.excitationsPerWinding.forEach((excitation, windingIndex) => {
                     {
                         const auxCurrent = formatUnit(excitation.current?.processed?.rms || 0, 'A');
-                        const auxVoltage = formatUnit(excitation.voltage?.processed?.rms || 0, 'A');
+                        const auxVoltage = formatUnit(excitation.voltage?.processed?.rms || 0, 'V');
                         const currentLabel = excitation.current?.processed?.label || 'Custom';
                         const voltageLabel = excitation.voltage?.processed?.label || 'Custom';
                         text += ` &emsp;&emsp;Winding ${escapeHtml(this.masStore.mas.magnetic.coil.functionalDescription[windingIndex].name)} has a ${this.getValueColor(currentLabel.toLowerCase())} current, with an RMS of ${this.getValueColor(`${removeTrailingZeroes(auxCurrent.label, 2)} ${auxCurrent.unit}`)};`;
@@ -442,7 +442,7 @@ export default {
             }
 
             if (this.masStore.mas.inputs.designRequirements.turnsRatios != null && this.masStore.mas.inputs.designRequirements.turnsRatios.length > 0) {
-                this.texts.designRequirements.turnsRatios = `${this.getTitleColor('Turns ratios')}: `
+                this.texts.designRequirements.turnsRatios = `${this.getTitleColor('Turns ratios (Np/Ns)')}: `
                 const primaryWindingName = this.masStore.mas.magnetic.coil.functionalDescription[0].name;
                 this.masStore.mas.inputs.designRequirements.turnsRatios.forEach((dimension, dimensionIndex) => {
                     const windingName = this.masStore.mas.magnetic.coil.functionalDescription[dimensionIndex + 1].name;
