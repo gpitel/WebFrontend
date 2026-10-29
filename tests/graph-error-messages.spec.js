@@ -1,5 +1,5 @@
 /**
- * Every builder graph says why the engine refused its sweep. Seven of them
+ * Every builder graph says why the engine refused its sweep, in the chart and in the Engine log. Seven of them
  * used to drop the error into the console and show an empty chart (ABT #1669).
  *
  * The sweep is made to fail in-page with a known engine-style message, one
@@ -7,6 +7,7 @@
  */
 import { test, expect } from './_coverage.js';
 import { BASE_URL } from './utils/env.js';
+import { engineLogRecords } from './utils/index.js';
 
 const FIXTURE = new URL('./fixtures/04_forward_xfmr_e3216_n87.json', import.meta.url).pathname;
 
@@ -55,8 +56,12 @@ test.describe('Builder graphs report a refused sweep (ABT #1669)', () => {
             }, { graph, sweeps });
             // A graph with two sweeps (total losses) names both reasons.
             for (const each of [what].flat()) {
-                const label = page.locator('[data-cy$="-Graph-ErrorMessage"]').filter({ hasText: each });
-                await expect(label.first()).toContainText(`Error calculating ${each}: the engine refused this sweep`, { timeout: 60000 });
+                // The graph's record in the Engine log (Alf, 2026-10-22: not drawn under the chart).
+                await expect.poll(async () => (await engineLogRecords(page, { level: 'ERROR' }))
+                    .some((r) => r.module.endsWith(' graph') && r.message.includes(`Error calculating ${each}: the engine refused this sweep`)),
+                    { timeout: 60000 }).toBe(true);
+                // And where the chart would be, so an empty graph is never left unexplained (Alf, 2026-10-23).
+                await expect(page.locator('[data-cy$="-Graph-ErrorMessage"]').filter({ hasText: `Error calculating ${each}: the engine refused this sweep` }).first()).toBeVisible({ timeout: 10000 });
             }
         });
     }
