@@ -14,6 +14,7 @@ import { defaultIsolatedBuckWizardInputs, defaultIsolatedBuckBoostWizardInputs, 
 import ConverterWizardBase from './ConverterWizardBase.vue'
 import KhDiagnosticsPanel from './KhDiagnosticsPanel.vue'
 import CompactVoltageInput from './CompactVoltageInput.vue'
+import { khDesiredDutyCycle, dutyCycleWithoutInputVoltageMessage } from 'WebSharedComponents/assets/js/kirchhoffRuntime'
 import { tooltipsConverterWizards, dropdownLabelsConverterWizards } from 'WebSharedComponents/assets/js/texts'
 </script>
 
@@ -115,12 +116,13 @@ export default {
       aux['efficiency'] = this.localData.efficiency;
       if (this.localData.designLevel == 'I know the design I want') {
         aux['desiredInductance'] = this.localData.inductance;
-        const auxDesiredDutyCycle = [];
-        if (this.localData.inputVoltage.minimum != null && this.localData.dutyCycle?.minimum != null) auxDesiredDutyCycle.push(this.localData.dutyCycle.minimum);
-        if (this.localData.inputVoltage.nominal != null && this.localData.dutyCycle?.nominal != null) auxDesiredDutyCycle.push(this.localData.dutyCycle.nominal);
-        if (this.localData.inputVoltage.maximum != null && this.localData.dutyCycle?.maximum != null) auxDesiredDutyCycle.push(this.localData.dutyCycle.maximum);
-        aux['desiredDutyCycle'] = [auxDesiredDutyCycle];
-        aux['desiredDeadTime'] = [this.localData.deadTime];
+        // Each typed duty belongs to the input voltage of its row (Nom. / Min. / Max.); a duty
+        // whose input voltage is empty throws the message the wizard shows (ABT #2160).
+        const desiredDutyCycle = khDesiredDutyCycle(this.localData.inputVoltage, this.localData.dutyCycle);
+        if (desiredDutyCycle) aux['desiredDutyCycle'] = desiredDutyCycle;
+        // The dead time between the Isolated Buck's two switches (Kirchhoff config.forcedDeadTime).
+        // The Isolated Buck-Boost has one switch and a diode: no dead time, none is sent.
+        if (this.converterName == "Isolated Buck") aux['desiredDeadTime'] = [this.localData.deadTime];
         aux['desiredTurnsRatios'] = this.localData.outputsParameters.map(e => e.turnsRatio);
       } else {
         // The other option ('The on-resistance of the MOSFET') has no ripple input: the hidden
@@ -220,6 +222,11 @@ export default {
         },
         updateErrorMessage() {
             this.errorMessage = "";
+            // A duty typed for an input voltage the user did not enter belongs to no operating point.
+            if (this.localData.designLevel == 'I know the design I want') {
+                const dutyMessage = dutyCycleWithoutInputVoltageMessage(this.localData.inputVoltage, this.localData.dutyCycle);
+                if (dutyMessage) { this.errorMessage = dutyMessage; return; }
+            }
         },
         updateNumberOutputs(newNumber) {
             if (newNumber > this.localData.outputsParameters.length) {
@@ -866,7 +873,10 @@ export default {
           :textColor="$styleStore.wizard.inputTextColor"
           @update="updateErrorMessage"
         />
+        <!-- Duty Cycle rows are the duty AT each input voltage row (optional; the duty falls as the
+             voltage rises), not a tolerance band: no ordering between them, and all may be empty. -->
         <DimensionWithTolerance :name="'dutyCycle'" :tooltip="tooltipsConverterWizards['dutyCycle']" :replaceTitle="'Duty Cycle'" :unit="null"
+          :allowAllNull="true" :allowUnsorted="true"
           :dataTestLabel="dataTestLabel + '-DutyCycle'"
           :min="0.01" :max="0.99"
           :labelWidthProportionClass="'col-5'" :valueWidthProportionClass="'col-7'"
@@ -880,7 +890,7 @@ export default {
           :textColor="$styleStore.wizard.inputTextColor"
           @update="updateErrorMessage"
         />
-        <Dimension :name="'deadTime'" :tooltip="tooltipsConverterWizards['deadTime']" :replaceTitle="'Dead Time'" unit="s"
+        <Dimension v-if="converterName == 'Isolated Buck'" :name="'deadTime'" :tooltip="tooltipsConverterWizards['deadTime']" :replaceTitle="'Dead Time'" unit="s"
           :dataTestLabel="dataTestLabel + '-DeadTime'"
           :min="0" :max="1e-3"
           v-model="localData"

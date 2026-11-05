@@ -1,14 +1,18 @@
-import { checkAndFixMas, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import { checkAndFixMas, deepCopy, formatUnit } from 'WebSharedComponents/assets/js/utils.js'
 import { defaultOperatingPointExcitation, defaultOperatingConditions, powerMas } from 'WebSharedComponents/assets/js/defaults.js'
 import { WaveformLabel } from 'WebSharedComponents/assets/ts/MAS.ts'
 import Ajv2020 from 'ajv/dist/2020'
 import addFormats from 'ajv-formats'
 import masSchemaBundle from 'WebSharedComponents/assets/js/masSchemas.json'
-import { findOutdatedCoreMaterial } from './coreMaterialFreshness.js'
+import { findOutdatedCoreMaterial, invalidLossDataWarning } from './coreMaterialFreshness.js'
 import { useCoreMaterialNoticeStore } from '../stores/coreMaterialNotice.js'
+import { useRefusedCoreMaterialStore } from '/MagneticBuilder/src/stores/refusedCoreMaterial'
 import { useLoadCorrectionsStore } from '../stores/loadCorrections.js'
 import { reportNotice } from 'WebSharedComponents/assets/js/notices.js'
-import { engineUserSettingsSettled } from '../stores/engineDiagnostics.js'
+import { describeFailure } from 'WebSharedComponents/assets/js/noticeText.js'
+import { describeMasSchemaErrors } from 'WebSharedComponents/assets/js/masSchemaText.js'
+import { engineUserSettingsSettled, useEngineDiagnosticsStore } from '../stores/engineDiagnostics.js'
+import { stripNulls } from './masNulls.js'
 
 // Map every WaveformLabel enum value by its lowercase, space-free form so legacy
 // documents with pre-1.0 labels ("Triangular", "Flyback Primary", "Rectangular
@@ -17,26 +21,6 @@ const waveformLabelKey = (label) => label.toLowerCase().replace(/\s+/g, '');
 const waveformLabelByKey = Object.fromEntries(
     Object.values(WaveformLabel).map((value) => [waveformLabelKey(value), value]));
 
-// Same null-stripping the MAS sentry applies before Convert validation:
-// quicktype optionals reject explicit null, and files exported by the app
-// carry plenty of them. Works on a deep copy — callers pass a throwaway.
-function stripNulls(value) {
-    if (Array.isArray(value)) {
-        value.forEach(stripNulls);
-        return value;
-    }
-    if (value && typeof value === 'object') {
-        for (const key of Object.keys(value)) {
-            if (value[key] === null || value[key] === 'null' || value[key] === undefined) {
-                delete value[key];
-            } else {
-                stripNulls(value[key]);
-            }
-        }
-    }
-    return value;
-}
-
 // The MAS JSON Schema violations of a document, as ajv reports them (instancePath, keyword,
 // params). The same schemas the MAS sentry applies (masValidator.js), compiled here as well
 // because the import migrations below act on WHERE and WHAT each violation is, and the sentry
@@ -44,7 +28,7 @@ function stripNulls(value) {
 let masImportValidator = null;
 function masImportErrors(mas) {
     if (masImportValidator == null) {
-        const ajv = new Ajv2020({ strict: false, allErrors: true });
+        const ajv = new Ajv2020({ strict: false, allErrors: true, verbose: true });
         addFormats(ajv);
         for (const schema of masSchemaBundle.schemas) ajv.addSchema(schema);
         masImportValidator = ajv.getSchema('https://psma.com/mas/MAS.json');
@@ -54,6 +38,17 @@ function masImportErrors(mas) {
     }
     const probe = stripNulls(JSON.parse(JSON.stringify(mas)));
     return masImportValidator(probe) ? [] : (masImportValidator.errors || []);
+}
+
+// A quantity in a message: three significant digits and an SI prefix (25.7 ns, 16.7 ms, 60 kHz).
+function formatQuantity(value, unit) {
+    const { label, unit: prefixedUnit } = formatUnit(value, unit, 1, 1e-9);
+    return `${Number(Number(label).toPrecision(3))} ${prefixedUnit}`;
+}
+
+// An engine failure's readable part, to continue a sentence (no closing full stop).
+function inOneSentence(error) {
+    return describeFailure(error).message.replace(/[.\s]+$/, '');
 }
 
 function describeSchemaError(error) {
@@ -340,7 +335,7 @@ function placeWaveformsOnTheirPeriod(mas, corrections) {
                 if (unitSlip != null) {
                     if (signalName === 'magnetizingCurrent') {
                         delete excitation.magnetizingCurrent;
-                        correct(signalName, `the magnetizing current was stored over ${span} s, ${unitSlip} times the period of ${excitation.frequency} Hz, so its values were derived on the wrong period; it was removed and MKF derives it again`);
+                        correct(signalName, `the magnetizing current was stored over ${formatQuantity(span, 's')}, ${unitSlip} times the ${formatQuantity(period, 's')} period of ${formatQuantity(excitation.frequency, 'Hz')}, so its values were derived on the wrong period; it was removed and MKF derives it again from the voltage`);
                         continue;
                     }
                     const scale = period / span;
@@ -355,7 +350,7 @@ function placeWaveformsOnTheirPeriod(mas, corrections) {
                         }
                         if (typeof processed.deadTime === 'number') processed.deadTime *= scale;
                     }
-                    correct(signalName, `the ${description} waveform was stored over ${span} s, ${unitSlip} times the period of ${excitation.frequency} Hz; its time axis was scaled to one period (${period} s)`);
+                    correct(signalName, `the ${description} waveform was stored over ${formatQuantity(span, 's')}, ${unitSlip} times the ${formatQuantity(period, 's')} period of ${formatQuantity(excitation.frequency, 'Hz')}; its time axis was scaled to one period`);
                     continue;
                 }
 
@@ -365,7 +360,7 @@ function placeWaveformsOnTheirPeriod(mas, corrections) {
                 if (signalName !== 'magnetizingCurrent' && gap > 0 && gap <= longestStep) {
                     signal.waveform.time = [...time, period];
                     signal.waveform.data = [...data, data[0]];
-                    correct(signalName, `the ${description} waveform stopped ${gap} s before the end of its period (${period} s); its first value was repeated at the end of the period`);
+                    correct(signalName, `the ${description} waveform stopped ${formatQuantity(gap, 's')} before the end of its ${formatQuantity(period, 's')} period; its first value was repeated at the end of the period`);
                 }
             }
         }
@@ -823,8 +818,14 @@ export async function loadMasIntoApp(doc, { masStore, stateStore, userStore, tas
         // the schema would open into a builder where nothing computes. Say what is wrong instead.
         const schemaErrors = masImportErrors(response);
         if (schemaErrors.length > 0) {
-            const shown = [...new Set(schemaErrors.map(describeSchemaError))];
-            throw new Error(`this file does not follow the MAS schema: ${shown.slice(0, 8).join('; ')}${shown.length > 8 ? ` (+${shown.length - 8} more)` : ''}`);
+            // In words: which part of the design, which field, what is wrong with it. The
+            // validator's own report goes to the console with the error.
+            const sentences = describeMasSchemaErrors(schemaErrors, 'Mas', stripNulls(JSON.parse(JSON.stringify(response))));
+            const shown = sentences.slice(0, 8).join('\n');
+            const more = sentences.length > 8 ? `\n(and ${sentences.length - 8} more)` : '';
+            const error = new Error(`it does not follow the MAS format:\n${shown}${more}\nCorrect these values in the file and load it again.`);
+            error.detail = [...new Set(schemaErrors.map(describeSchemaError))].join('; ');
+            throw error;
         }
         try {
             autocompletedMas = await taskQueueStore.masAutocomplete(response, false, {});
@@ -852,12 +853,17 @@ export async function loadMasIntoApp(doc, { masStore, stateStore, userStore, tas
                     const alsoTheMagnetic = magneticError.message === autocompleteError.message
                         ? ''
                         : `; nor its magnetic alone: ${magneticError.message}`;
-                    throw new Error(`MKF could not complete this design: ${autocompleteError.message}${alsoTheMagnetic}`);
+                    const alsoTheMagneticInWords = alsoTheMagnetic === '' ? '' : `; nor its magnetic alone: ${inOneSentence(magneticError)}`;
+                    const error = new Error(`the engine could not complete this design: ${inOneSentence(autocompleteError)}${alsoTheMagneticInWords}. Correct this in the file and load it again.`);
+                    error.detail = `${autocompleteError.message}${alsoTheMagnetic}`;
+                    throw error;
                 }
                 try {
                     await completeProcessedOnlySignals(response, taskQueueStore);
                 } catch (signalError) {
-                    throw new Error(`MKF could not complete this design: ${autocompleteError.message}; and with its magnetic completed alone, ${signalError.message}`);
+                    const error = new Error(`the engine could not complete this design: ${inOneSentence(autocompleteError)}; and with its magnetic completed alone, ${inOneSentence(signalError)}. Correct this in the file and load it again.`);
+                    error.detail = `${autocompleteError.message}; and with its magnetic completed alone, ${signalError.message}`;
+                    throw error;
                 }
                 autocompletedMas = { ...response, magnetic: completedMagnetic };
                 console.warn(`Imported MAS: MKF could not complete this design, so it is opened with its magnetic completed and its inputs as the file holds them: ${autocompleteError.message}`);
@@ -884,14 +890,41 @@ export async function loadMasIntoApp(doc, { masStore, stateStore, userStore, tas
     coreMaterialNotice.clear();
     const loadCorrections = useLoadCorrectionsStore();
     loadCorrections.clear();
-    const outdatedCoreMaterial = await findOutdatedCoreMaterial(autocompletedMas, { taskQueueStore, userStore });
-    if (outdatedCoreMaterial != null) {
-        console.warn(`Imported MAS: the design's copy of core material '${outdatedCoreMaterial.name}' gives other core losses than the library's; the file's copy is kept`);
+    // The material is judged on its own by MKF (services/coreMaterialFreshness.js), whatever the
+    // rest of the design does. A copy MKF cannot judge at all (no temperature data), or a verdict the
+    // web has no rule for, is an error in the Engine log; the design still opens, with no verdict on
+    // its material.
+    let outdatedCoreMaterial = null;
+    try {
+        outdatedCoreMaterial = await findOutdatedCoreMaterial(autocompletedMas, { taskQueueStore });
+    } catch (error) {
+        console.error(`Imported MAS: the engine cannot judge the design's copy of its core material: ${error.message}`);
+        reportNotice('ERROR', 'Load', `The engine cannot judge the design's copy of its core material: ${error.message}`);
+    }
+    if (outdatedCoreMaterial?.invalid != null) {
+        console.warn(`Imported MAS: MKF refuses the design's copy of core material '${outdatedCoreMaterial.name}' (${outdatedCoreMaterial.invalid}); the file's copy is kept until the user replaces it`);
+    }
+    else if (outdatedCoreMaterial != null) {
+        console.warn(`Imported MAS: the design's copy of core material '${outdatedCoreMaterial.name}' differs from the library's; the file's copy is kept`);
+    }
+    const lossDataWarning = outdatedCoreMaterial == null ? null : invalidLossDataWarning(outdatedCoreMaterial);
+
+    // The builder's info panels do not compute with a copy MKF refuses; they say it must be
+    // updated, until the design holds another material (the notice's update, or the user's pick).
+    const refusedCoreMaterial = useRefusedCoreMaterialStore();
+    if (outdatedCoreMaterial?.invalid != null) {
+        refusedCoreMaterial.set(masStore.$id, autocompletedMas.magnetic.core.functionalDescription.material, outdatedCoreMaterial.invalid);
+    }
+    else {
+        refusedCoreMaterial.clear(masStore.$id);
     }
 
     masStore.resetMas();
     masStore.mas = autocompletedMas;
     coreMaterialNotice.set(outdatedCoreMaterial);
+    if (lossDataWarning != null) {
+        useEngineDiagnosticsStore().addRecord('WARNING', 'Load', lossDataWarning.message, { code: lossDataWarning.code, detail: lossDataWarning.detail });
+    }
     loadCorrections.set(corrections);
     // What the load changed in the magnetic itself is reported in the Engine log; waveform
     // corrections are shown on the Op. Points page, next to their signal.

@@ -1,6 +1,7 @@
 <script setup>
-import { clean, download, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
+import { cleanKeepingCoreMaterials, download, deepCopy } from 'WebSharedComponents/assets/js/utils.js'
 import { assertValidMas } from 'WebSharedComponents/assets/js/masValidator.js'
+import { describeFailure } from 'WebSharedComponents/assets/js/noticeText.js'
 
 </script>
 <script>
@@ -31,6 +32,7 @@ export default {
         return {
             exported,
             exportError,
+            exportErrorDetail: null,
         }
     },
     computed: {
@@ -55,16 +57,20 @@ export default {
             //  - "only with magnetic": a MAS Magnetic document (magnetic.json). It used
             //    to be a MAS with inputs and outputs deleted, which MAS requires, so it
             //    was never a valid MAS file. Load MAS reads both.
-            // clean() drops null / empty values: MAS has no null for an absent optional.
+            // clean() drops null / empty values: MAS has no null for an absent optional. The core
+            // material keeps its empty objects, which MAS can require (cleanKeepingCoreMaterials).
             // Any failure is shown under the button: a click that silently does nothing
             // reads as a broken app.
             try {
                 const kind = this.includeInputs ? 'Mas' : 'Magnetic';
-                const doc = clean(deepCopy(this.includeInputs ? this.mas : this.mas.magnetic));
+                const doc = cleanKeepingCoreMaterials(deepCopy(this.includeInputs ? this.mas : this.mas.magnetic));
                 assertValidMas(kind, doc, 'MAS export');
                 download(JSON.stringify(doc, null, 4), this.fileName(), "text/plain");
             } catch (e) {
-                this.exportError = e.message;
+                // What is wrong, in words; the validator's report is the tooltip.
+                const { message, detail } = describeFailure(e);
+                this.exportError = message;
+                this.exportErrorDetail = detail;
                 // eslint-disable-next-line no-console
                 console.error(e);
                 return;
@@ -88,7 +94,7 @@ export default {
         >
             {{includeInputs? 'Download MAS file with excitations and results' : 'Download MAS file only with magnetic'}}
         </button>
-        <p v-if="exportError" :data-cy="dataTestLabel + '-export-error'" class="text-danger small mt-2 mb-0">
+        <p v-if="exportError" v-tooltip="exportErrorDetail" :data-cy="dataTestLabel + '-export-error'" class="text-danger small mt-2 mb-0">
             The MAS file was not downloaded: {{ exportError }}
         </p>
     </div>

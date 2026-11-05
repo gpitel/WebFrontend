@@ -69,9 +69,11 @@ export default {
         columnNameChanged(value) {
             this.$emit("updatedColumnName");
         },
+        // The frequency of the imported signal. It is not written into the operating point here:
+        // the circuit-simulator view keeps it and stores it only with a complete imported
+        // excitation (Alf, 2026-10-26), so leaving the view without importing changes nothing.
         frequencyChanged(value) {
-            this.modelValue.frequency = value;
-            if (this.modelValue.frequency < 2) {
+            if (value < 2) {
                 this.errorMessages = 'Please, introduce the frequency of your imported signal';
             }
             else {
@@ -85,14 +87,6 @@ export default {
 
 <template>
     <div class="container-flex">
-        <div class="row text-center">
-            <label
-                :style="combinedStyle([$styleStore.operatingPoints.inputTitleFontSize, $styleStore.operatingPoints.commonParameterTextColor])"
-                class=""
-            >
-                {{'Common parameters'}}
-            </label>
-        </div>
         <div class="row">
 
             <Dimension class="pb-2 mb-1"
@@ -120,7 +114,7 @@ export default {
                 :dataTestLabel="dataTestLabel + '-Current-Name'"
                 :options="allColumnNames"
                 :titleSameRow="true"
-                :replaceTitle="'Cur. Time'"
+                :replaceTitle="'Time'"
                 v-model="$stateStore.operatingPointsCircuitSimulator.columnNames[currentOperatingPointIndex][currentWindingIndex]"
                 :labelWidthProportionClass="'col-12 md:col-7'"
                 :valueWidthProportionClass="'col-12 md:col-5'"

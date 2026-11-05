@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { waitForMkf, updateEngineSettings } from 'WebSharedComponents/assets/js/mkfRuntime'
 import { useSettingsStore } from '/src/stores/settings'
 import { useMasStore } from '/src/stores/mas'
+import { describeFailure } from 'WebSharedComponents/assets/js/noticeText.js'
 
 // Engine settings an advanced user changes in Settings, and MKF's own log for advanced users.
 //
@@ -18,8 +19,12 @@ import { useMasStore } from '/src/stores/mas'
 //   enabled in Settings.
 
 export const ENGINE_LOG_LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+// Module of the records saying why the current design step cannot continue (StorylineErrors.vue).
+export const DESIGN_STEP_MODULE = 'Design step';
 const MAXIMUM_RECORDS = 2000;
 const DRAIN_INTERVAL_MS = 1000;
+// Same message, same level, within this time: one failure seen by several parts of the builder.
+const MERGE_WINDOW_MS = 5000;
 // Builder actions that evaluate core-loss data, i.e. the ones that can extrapolate it.
 const CORE_LOSS_ACTIONS = new Set(['simulate', 'calculateCoreLosses', 'sweepCoreLossesOverFrequency', 'sweepVolumetricLossesOverFrequency']);
 
@@ -90,6 +95,13 @@ export const useEngineDiagnosticsStore = defineStore('engineDiagnostics', {
     getters: {
         warningCount: (state) => state.records.filter((r) => r.level === 'WARNING').reduce((n, r) => n + r.count, 0),
         errorCount: (state) => state.records.filter((r) => r.level === 'ERROR' || r.level === 'CRITICAL').reduce((n, r) => n + r.count, 0),
+        // Whether the log can be opened (the footer's button and the panel). Extrapolated material
+        // data is reported only here, so the log is reachable whenever extrapolation is allowed,
+        // even with the full panel switched off (ABT #1652). The builder's warnings and errors are
+        // reported only here too (notices.js), so it is reachable whenever it holds a record.
+        logReachable: (state) => useSettingsStore().engineLogSettings?.showEngineLog === true
+            || state.allowMaterialDataExtrapolation === true
+            || state.records.length > 0,
     },
 
     actions: {
@@ -255,13 +267,40 @@ export const useEngineDiagnosticsStore = defineStore('engineDiagnostics', {
             if (drained.length === 0) return;
             const timestamp = new Date().toISOString();
             for (const record of drained) {
+                // MKF's `detail`: the part of the message that varies between its repeats (the value
+                // asked, e.g. the frequency of each extrapolation of one material), the latest repeat's;
+                // "" when the record has none. MKF keeps it out of `message`, so repeats stay one row.
+                if (typeof record.detail !== 'string') {
+                    throw new Error(`drain_log_collection returned a record without its detail `
+                        + `(${JSON.stringify(record)}): libMKF is older than the log's detail field`);
+                }
+                // MKF's error-code tag ("[MATERIAL_FREQUENCY_OUT_OF_SPAN] ...") is the record's code,
+                // as for the builder's records; the full text stays as its detail.
+                const { message, code, detail } = describeFailure(record.message);
+                // MKF counts repeats within one drain; a warning repeated across drains (one per
+                // calculation) is the same record counting up, moved to where it last happened,
+                // not a new row every time another record came in between.
+                const sameIndex = this.records.findIndex((other) => other.fromEngine === true
+                    && other.level === record.level && other.module === record.module && other.message === message);
+                if (sameIndex >= 0) {
+                    const [same] = this.records.splice(sameIndex, 1);
+                    same.count += record.count;
+                    same.timestamp = timestamp;
+                    same.latestDetail = record.detail;
+                    this.records.push(same);
+                    continue;
+                }
                 this.records.push({
                     id: this.nextRecordId++,
                     timestamp,
                     level: record.level,
                     module: record.module,
-                    message: record.message,
+                    message,
+                    code,
+                    detail,
+                    latestDetail: record.detail,
                     count: record.count,
+                    fromEngine: true,
                 });
             }
             if (this.records.length > MAXIMUM_RECORDS) {
@@ -270,18 +309,48 @@ export const useEngineDiagnosticsStore = defineStore('engineDiagnostics', {
         },
 
         // A record that does not come from MKF's collector (the builder's calculation failures, what a
-        // load corrected): the same message from the same source as the last record counts up.
-        addRecord(level, module, message) {
+        // load corrected). `more`: { code, detail } of a failure (WebSharedComponents noticeText.js),
+        // the detail shown as the message's tooltip.
+        // - The same message from the same source as the last record counts up.
+        // - One failure reaches several parts of the builder at once (the thermal model refusing a
+        //   coil fails Coil info's simulation and Core info's losses): the same message at the same
+        //   level within MERGE_WINDOW_MS is one record, naming every part it reached.
+        addRecord(level, module, message, more = {}) {
             if (!ENGINE_LOG_LEVELS.includes(level)) {
                 throw new Error(`Unknown engine log level '${level}'`);
             }
+            const now = Date.now();
             const last = this.records[this.records.length - 1];
             if (last != null && last.level === level && last.module === module && last.message === message) {
                 last.count += 1;
-                last.timestamp = new Date().toISOString();
+                last.timestamp = new Date(now).toISOString();
                 return;
             }
-            this.records.push({ id: this.nextRecordId++, timestamp: new Date().toISOString(), level, module, message, count: 1 });
+            for (let i = this.records.length - 1; i >= 0; i--) {
+                const record = this.records[i];
+                if (now - Date.parse(record.timestamp) > MERGE_WINDOW_MS) break;
+                if (record.level !== level || record.message !== message || record.sources == null) continue;
+                if (record.sources.includes(module)) {
+                    record.count += 1;
+                }
+                else {
+                    record.sources.push(module);
+                    record.module = record.sources.join(', ');
+                }
+                record.timestamp = new Date(now).toISOString();
+                return;
+            }
+            this.records.push({
+                id: this.nextRecordId++,
+                timestamp: new Date(now).toISOString(),
+                level,
+                module,
+                sources: [module],
+                message,
+                code: more?.code ?? null,
+                detail: more?.detail ?? null,
+                count: 1,
+            });
             if (this.records.length > MAXIMUM_RECORDS) {
                 this.records = this.records.slice(-MAXIMUM_RECORDS);
             }
@@ -295,13 +364,24 @@ export const useEngineDiagnosticsStore = defineStore('engineDiagnostics', {
             const operatingPoints = useMasStore().mas.inputs?.operatingPoints ?? [];
             for (const finding of findings) {
                 const index = finding.operatingPointIndex;
+                // MKF's finer points of a finding (how it was computed) are its tooltip.
+                const more = { code: finding.code ?? null, detail: finding.details ?? null };
                 if (index == null) {
-                    this.addRecord('WARNING', SIMULATION_FINDINGS_MODULE, finding.message.charAt(0).toUpperCase() + finding.message.slice(1));
+                    this.addRecord('WARNING', SIMULATION_FINDINGS_MODULE, finding.message.charAt(0).toUpperCase() + finding.message.slice(1), more);
                     continue;
                 }
                 const pointName = finding.operatingPointName ?? operatingPoints[index]?.name ?? `Operating point ${index + 1}`;
                 const message = finding.message.replace(/^At operating point \d+( \('[^']*'\))?(: |, )/, '');
-                this.addRecord('WARNING', SIMULATION_FINDINGS_MODULE, `${pointName}: ${message.charAt(0).toUpperCase() + message.slice(1)}`);
+                this.addRecord('WARNING', SIMULATION_FINDINGS_MODULE, `${pointName}: ${message.charAt(0).toUpperCase() + message.slice(1)}`, more);
+            }
+        },
+
+        // reasons: why the design step `step` cannot continue yet (empty once it can). They replace the
+        // step's previous reasons, so the log always holds the current ones, one ERROR record each.
+        replaceStepBlockers(step, reasons) {
+            this.records = this.records.filter((record) => record.module !== DESIGN_STEP_MODULE);
+            for (const reason of reasons) {
+                this.addRecord('ERROR', DESIGN_STEP_MODULE, `${step}: ${reason}`);
             }
         },
 

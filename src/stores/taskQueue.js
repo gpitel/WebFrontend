@@ -11,7 +11,8 @@ import { waitForMkf, isWorkerMode, updateEngineSettings, queueEngineSettingsTask
 // webMKF via waitForMkf().
 import { waitForKirchhoff } from 'WebSharedComponents/assets/js/kirchhoffRuntime'
 import { assertValidMas } from 'WebSharedComponents/assets/js/masValidator.js'
-import { clean } from 'WebSharedComponents/assets/js/utils'
+import { DETAILS_SEPARATOR } from 'WebSharedComponents/assets/js/noticeText.js'
+import { withoutNulls } from 'WebSharedComponents/assets/js/utils'
 import { unitSystem } from 'WebSharedComponents/assets/js/units.js'
 import { useInventoryStore, ENGINE_HAS_CONTEXT_ADVISERS } from '../stores/inventory'
 import { requireAdviserExcitations, requireCoreAdviseMode } from 'WebSharedComponents/assets/js/adviserInputs.js'
@@ -27,6 +28,19 @@ import { requireAdviserExcitations, requireCoreAdviseMode } from 'WebSharedCompo
 //
 // We never silently downgrade — on failure we throw with the full quicktype
 // error message (which includes the offending field path).
+// What each sentry-guarded call is, as the user knows it.
+const SENTRY_CALLS = {
+    masAutocomplete: 'the design could not be completed',
+    magneticAutocomplete: 'the magnetic could not be completed',
+    calculateAdvisedCores: 'the core adviser was not run',
+    calculateAdvisedMagnetics: 'the magnetic adviser was not run',
+    getMaximumDimensions: 'its dimensions were not calculated',
+    calculateLeakageInductance: 'the leakage inductance was not calculated',
+    exportMagneticAsSubcircuit: 'the SPICE subcircuit was not exported',
+    exportMagneticAsSymbol: 'the schematic symbol was not exported',
+    simulateFlybackWithMagnetic: 'the flyback simulation was not run',
+};
+
 function masSentry(where, kind, obj) {
     // Sentry-local cleaner. Recursively strips keys whose value is `null`,
     // `"null"`, or `undefined` from objects (not arrays). Quicktype's optional
@@ -63,7 +77,21 @@ function masSentry(where, kind, obj) {
         const msg = `[MAS sentry @ ${where}/${kind}] Frontend produced invalid payload: ${e.message} | DR keys: ${JSON.stringify(drKeys)} | ${drApp}`;
         // eslint-disable-next-line no-console
         console.error(msg);
-        throw new Error(msg);
+        const call = SENTRY_CALLS[where];
+        if (call == null) {
+            throw new Error(`[MAS sentry] no description of the call '${where}' for the user: add it to SENTRY_CALLS. ${msg}`);
+        }
+        // masValidator words the violations; its own report follows ' Details: ', and is the
+        // detail of this message too (the Engine log shows it as a tooltip).
+        // At most 8 of them, as the load dialog does; the full report is the detail.
+        const sentences = Array.isArray(e.masSchemaSentences) ? e.masSchemaSentences : [];
+        const inWords = sentences.length === 0 ? ''
+            : ` ${sentences.slice(0, 8).join(' ')}${sentences.length > 8 ? ` (and ${sentences.length - 8} more)` : ''}`;
+        const separator = e.message.indexOf(DETAILS_SEPARATOR);
+        const technical = separator >= 0 ? e.message.slice(separator + DETAILS_SEPARATOR.length) : e.message;
+        throw new Error(`The design does not follow the MAS format, so ${call}.${inWords} `
+            + 'Correct these values, or report this design if you did not set them.'
+            + `${DETAILS_SEPARATOR}[MAS sentry @ ${where}/${kind}] ${technical} | DR keys: ${JSON.stringify(drKeys)} | ${drApp}`);
     }
 }
 
@@ -149,15 +177,36 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             return materialData;
         },
 
-        // Core losses of one operating point with the core exactly as given (its material included),
-        // for the loader's comparison of a stored material copy with the library's
-        // (services/coreMaterialFreshness.js). Not the builder's calculateCoreLosses: nothing listens
-        // to this one, so it never lands in the builder's displays.
-        async calculateCoreLossesForMaterialCheck(core, coil, inputs, modelsData, operatingPointIndex) {
+        // MKF's verdict on a core material alone, without a design (check_core_material): a material
+        // name in the library or a full CoreMaterial (e.g. the copy a stored design embeds). Returns
+        // {material, valid, problems: [{code, property, message, engineMessage, temperature, frequency}],
+        // coverage, notChecked}; each problem carries the error code the design calculation throws
+        // when it refuses the material there. For the loader's verdict on a stored material copy
+        // (services/coreMaterialFreshness.js); nothing listens to this one.
+        async checkCoreMaterial(material) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const result = await mkf.calculate_core_losses(JSON.stringify(core), JSON.stringify(coil), JSON.stringify(inputs), JSON.stringify(modelsData), operatingPointIndex);
+            const argument = typeof material === 'string' ? material : JSON.stringify(withoutNulls(material));
+            const result = await mkf.check_core_material(argument);
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
+        },
+
+        // Two copies of a core material priced with the design's core-loss path at points taken
+        // from the REFERENCE copy's own data (compare_core_material_volumetric_losses). Each is a
+        // material name in the library or a full CoreMaterial. Returns {reference, other,
+        // pointsSource, points: [{frequency, magneticFluxDensityPeak, temperature, reference:
+        // {volumetricLosses, code, message}, other: {...}, relativeDifference}],
+        // maximumAbsoluteRelativeDifference, pointsRefusedByReference, pointsRefusedByOther}.
+        async compareCoreMaterialVolumetricLosses(reference, other) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const argument = (material) => typeof material === 'string' ? material : JSON.stringify(withoutNulls(material));
+            const result = await mkf.compare_core_material_volumetric_losses(argument(reference), argument(other));
             if (result.startsWith('Exception')) {
                 throw new Error(result);
             }

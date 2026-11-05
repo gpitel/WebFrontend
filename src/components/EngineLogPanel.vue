@@ -2,9 +2,9 @@
 import { useEngineDiagnosticsStore } from '/src/stores/engineDiagnostics'
 
 // MKF's own warnings and log, for advanced users (Settings > Advanced > Engine log panel).
-// The engine keeps structured records ({level, module, message, count}); the store drains them
-// after engine calls while the panel is enabled. Collapsed, it is a button at the bottom left
-// with the warning count; expanded, a panel like the debug console's.
+// The engine keeps structured records ({level, module, message, count, detail}); the store drains them
+// after engine calls while the panel is enabled. Collapsed, it is the footer's "Engine log" button
+// with the warning count (Footer.vue); expanded, a panel like the debug console's.
 export default {
     name: 'EngineLogPanel',
     setup() {
@@ -18,20 +18,12 @@ export default {
         };
     },
     computed: {
-        isEnabled() {
-            // Extrapolated material data is reported only here, so the log is reachable whenever
-            // extrapolation is allowed, even with the full panel switched off (ABT #1652).
-            // The builder's warnings and errors are reported only here too (notices.js), so it is
-            // reachable whenever it holds a record.
-            return this.$settingsStore?.engineLogSettings?.showEngineLog === true
-                || this.engineDiagnosticsStore.allowMaterialDataExtrapolation === true
-                || this.engineDiagnosticsStore.records.length > 0;
-        },
         filteredRecords() {
             const records = this.engineDiagnosticsStore.records;
             if (!this.searchQuery) return records;
             const q = this.searchQuery.toLowerCase();
-            return records.filter((r) => r.message.toLowerCase().includes(q) || r.module.toLowerCase().includes(q));
+            return records.filter((r) => r.message.toLowerCase().includes(q) || r.module.toLowerCase().includes(q)
+                || (this.tooltipText(r) ?? '').toLowerCase().includes(q));
         },
     },
     watch: {
@@ -45,6 +37,10 @@ export default {
         },
     },
     methods: {
+        // "1 record", "2 records"
+        counted(count, noun) {
+            return `${count} ${noun}${count === 1 ? '' : 's'}`;
+        },
         formatTime(timestamp) {
             return new Date(timestamp).toLocaleTimeString('en-US', {
                 hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -59,9 +55,20 @@ export default {
                 default: return 'text-secondary';
             }
         },
+        // What the row's tooltip says: the latest value of the part of an engine message that varies
+        // between its repeats (one row per message, counted), then the technical text behind the
+        // message. null when the record has neither.
+        tooltipText(record) {
+            const lines = [];
+            if (record.latestDetail) lines.push(`latest: ${record.latestDetail}`);
+            if (record.detail) lines.push(record.detail);
+            return lines.length > 0 ? lines.join('\n') : null;
+        },
         copyToClipboard() {
             const text = this.filteredRecords.map((r) =>
                 `[${this.formatTime(r.timestamp)}] [${r.level}] [${r.module}] ${r.message}${r.count > 1 ? ` (x${r.count})` : ''}`
+                + (r.latestDetail ? `\n    Latest: ${r.latestDetail}` : '')
+                + (r.detail ? `\n    Details: ${r.detail}` : '')
             ).join('\n');
             navigator.clipboard.writeText(text);
         },
@@ -70,15 +77,14 @@ export default {
 </script>
 
 <template>
-    <div v-if="isEnabled && engineDiagnosticsStore.panelOpen" class="engine-log-panel" data-cy="EngineLogPanel">
+    <div v-if="engineDiagnosticsStore.logReachable && engineDiagnosticsStore.panelOpen" class="engine-log-panel" data-cy="EngineLogPanel">
         <div class="engine-log-header">
             <div class="engine-log-title">
                 <i class="pi pi-cog mr-2"></i>
                 Engine log (MKF)
                 <span class="engine-log-badge">
-                    {{ engineDiagnosticsStore.records.length }} records,
-                    {{ engineDiagnosticsStore.warningCount }} warnings
-                    <span v-if="engineDiagnosticsStore.errorCount > 0" class="text-danger">, {{ engineDiagnosticsStore.errorCount }} errors</span>
+                    {{ counted(engineDiagnosticsStore.records.length, 'record') }},
+                    {{ counted(engineDiagnosticsStore.warningCount, 'warning') }}<span v-if="engineDiagnosticsStore.errorCount > 0">, </span><span v-if="engineDiagnosticsStore.errorCount > 0" class="text-danger">{{ counted(engineDiagnosticsStore.errorCount, 'error') }}</span>
                 </span>
                 <span v-if="engineDiagnosticsStore.allowMaterialDataExtrapolation" class="engine-log-extrapolating" data-cy="EngineLogPanel-extrapolating">
                     Extrapolating material data
@@ -117,23 +123,18 @@ export default {
                 <span class="engine-log-level" :class="levelClass(record.level)">{{ record.level }}</span>
                 <span class="engine-log-module">{{ record.module }}</span>
                 <pre class="engine-log-message">{{ record.message }}<span v-if="record.count > 1" class="engine-log-count"> (x{{ record.count }})</span></pre>
+                <!-- The latest value of what varies between the message's repeats, and the technical text
+                     behind the message (engine code, raw report): a tooltip, not a line. -->
+                <i
+                    v-if="tooltipText(record)"
+                    v-tooltip.left="{ value: tooltipText(record), class: 'engine-log-detail-tooltip' }"
+                    class="pi pi-info-circle engine-log-detail"
+                    :aria-label="tooltipText(record)"
+                    data-cy="EngineLogPanel-record-detail"
+                ></i>
             </div>
         </div>
     </div>
-
-    <button
-        v-else-if="isEnabled"
-        class="engine-log-toggle"
-        data-cy="EngineLogPanel-toggle"
-        :class="{ 'has-warnings': engineDiagnosticsStore.warningCount + engineDiagnosticsStore.errorCount > 0 }"
-        @click="engineDiagnosticsStore.panelOpen = true"
-        title="Engine log (MKF warnings and log)"
-    >
-        <i class="pi pi-cog"></i>
-        <span v-if="engineDiagnosticsStore.warningCount + engineDiagnosticsStore.errorCount > 0" class="engine-log-count-badge">
-            {{ engineDiagnosticsStore.warningCount + engineDiagnosticsStore.errorCount }}
-        </span>
-    </button>
 </template>
 
 <style scoped>
@@ -301,47 +302,35 @@ export default {
     font-family: inherit;
 }
 
+.engine-log-detail {
+    color: rgba(var(--p-white-rgb), 0.5);
+    font-size: 0.8rem;
+    padding-top: 0.15rem;
+    cursor: help;
+}
+
+.engine-log-detail:hover {
+    color: var(--p-warning);
+}
+
 .engine-log-count {
     color: rgba(var(--p-white-rgb), 0.5);
 }
 
-.engine-log-toggle {
-    position: fixed;
-    bottom: 20px;
-    left: 20px;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: var(--p-secondary);
-    border: none;
-    color: var(--p-white);
-    font-size: 1.2rem;
-    cursor: pointer;
-    z-index: 9997;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 10px rgba(var(--p-black-rgb), 0.3);
+</style>
+
+<style>
+/* The detail of a record is the engine's full text: keep its line breaks, wrap long words.
+   PrimeVue gives a tooltip its own inline z-index, below the panel's (9997): the tooltip of a
+   record would open behind the panel it belongs to. */
+.engine-log-detail-tooltip {
+    z-index: 9998 !important;
 }
 
-.engine-log-toggle.has-warnings {
-    background: var(--p-warning);
-}
-
-.engine-log-count-badge {
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    background: var(--p-danger);
-    color: var(--p-white);
-    font-size: 0.7rem;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 4px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
+.engine-log-detail-tooltip .p-tooltip-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 36rem;
+    font-size: 0.8rem;
 }
 </style>

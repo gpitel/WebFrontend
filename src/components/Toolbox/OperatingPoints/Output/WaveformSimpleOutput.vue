@@ -177,18 +177,18 @@ export default {
 </script>
 
 <template>
-    <div class="wso-card">
-        <div class="wso-header">
-            <i class="pi pi-gauge"></i>
-            <span>Quick stats</span>
-        </div>
+    <!-- Three headline figures as small tiles: label on top, value and unit below, each
+         tile edged in its signal's colour (current, voltage, power). -->
+    <section class="wso-card">
+        <h3 class="wso-header" data-op-title>Quick stats</h3>
         <div class="wso-body">
             <!-- processed.rms only exists once MKF has standardized the signal.
                  Render nothing until then — never a placeholder number. -->
             <DimensionReadOnly
                 v-if="modelValue.current?.processed?.rms != null"
+                class="wso-tile wso-tile-current"
                 :name="'rms'"
-                :replaceTitle="'Current RMS:'"
+                :replaceTitle="'Current RMS'"
                 :unit="'A'"
                 :unitMin="0.001"
                 :unitMax="1000"
@@ -197,16 +197,12 @@ export default {
                 :min="minimumMaximumScalePerParameter.current.min"
                 :max="minimumMaximumScalePerParameter.current.max"
                 :disableShortenLabels="true"
-                :valueFontSize="$styleStore.operatingPoints.inputTitleFontSize"
-                :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
-                :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
-                :valueBgColor="$styleStore.operatingPoints.inputValueBgColor"
-                :textColor="$styleStore.operatingPoints.inputTextColor"
             />
             <DimensionReadOnly
                 v-if="modelValue.voltage?.processed?.rms != null"
+                class="wso-tile wso-tile-voltage"
                 :name="'rms'"
-                :replaceTitle="'Voltage RMS:'"
+                :replaceTitle="'Voltage RMS'"
                 :unit="'V'"
                 :unitMin="0.001"
                 :unitMax="1000"
@@ -215,84 +211,99 @@ export default {
                 :min="minimumMaximumScalePerParameter.voltage.min"
                 :max="minimumMaximumScalePerParameter.voltage.max"
                 :disableShortenLabels="true"
-                :valueFontSize="$styleStore.operatingPoints.inputTitleFontSize"
-                :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
-                :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
-                :valueBgColor="$styleStore.operatingPoints.inputValueBgColor"
-                :textColor="$styleStore.operatingPoints.inputTextColor"
             />
             <DimensionReadOnly
+                class="wso-tile wso-tile-power"
                 :name="'rms'"
-                :replaceTitle="'Power:'"
+                :replaceTitle="'Power'"
                 :unit="'W'"
                 :dataTestLabel="dataTestLabel + '-Rms'"
                 :value="localData.rmsPower"
                 :min="minimumMaximumScalePerParameter.power.min"
                 :max="minimumMaximumScalePerParameter.power.max"
                 :disableShortenLabels="true"
-                :valueFontSize="$styleStore.operatingPoints.inputTitleFontSize"
-                :labelFontSize="$styleStore.operatingPoints.inputTitleFontSize"
-                :labelBgColor="$styleStore.operatingPoints.inputLabelBgColor"
-                :valueBgColor="$styleStore.operatingPoints.inputValueBgColor"
-                :textColor="$styleStore.operatingPoints.inputTextColor"
             />
         </div>
-    </div>
+    </section>
 </template>
 
 <style scoped>
 .wso-card {
-    background:
-        linear-gradient(180deg,
-            rgba(var(--p-primary-rgb), 0.06) 0%,
-            rgba(var(--p-primary-rgb), 0.02) 100%),
-        var(--p-dark);
-    border: 1px solid rgba(var(--p-primary-rgb), 0.18);
-    border-left: 3px solid rgba(var(--p-primary-rgb), 0.7);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 3px 10px rgba(var(--p-black-rgb), 0.3);
-    margin: 0.4rem 0;
+    margin: 0.5rem 0 0;
+    padding: 0;
 }
-
 .wso-header {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.7rem;
-    background: rgba(var(--p-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--p-primary-rgb), 0.18);
-    color: var(--p-primary);
-    font-weight: 600;
-    font-size: 0.72rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    margin: 0 0 0.35rem;
+    font-size: 0.86rem;
+    font-weight: 650;
+    line-height: 1.3;
+    color: var(--op-text);
 }
-
-.wso-header i {
-    font-size: 0.85rem;
-    filter: drop-shadow(0 0 4px rgba(var(--p-primary-rgb), 0.5));
-}
-
 .wso-body {
-    padding: 0.5rem 0.7rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 0.5rem;
 }
 
-.wso-body :deep(> *) {
-    padding: 0.3rem 0.4rem !important;
-    border-radius: 6px;
-    transition: background 0.15s;
+/* A tile: label on top, the value large in tabular figures with its unit beside it.
+   The shared component sets sizes and colours inline, hence !important. */
+.wso-body :deep(.wso-tile) {
+    --wso-colour: var(--p-primary);
+    min-width: 0;
+    margin: 0 !important;
+    padding: 0.45rem 0.7rem 0.5rem !important;
+    background: rgba(var(--p-white-rgb), 0.05);
+    border: 1px solid var(--op-rule);
+    border-left: 2px solid var(--wso-colour);
+    border-radius: 8px;
 }
-
-.wso-body :deep(> * + *) {
-    border-top: 1px solid rgba(var(--p-white-rgb), 0.04);
+.wso-body :deep(.wso-tile-current) {
+    --wso-colour: var(--p-warning);
 }
-
-.wso-body :deep(> *:hover) {
-    background: rgba(var(--p-white-rgb), 0.04);
+.wso-body :deep(.wso-tile-voltage) {
+    --wso-colour: var(--p-info);
+}
+.wso-body :deep(.dim-ro-row) {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "label label" "value unit";
+    align-items: baseline;
+    column-gap: 0.3rem;
+    row-gap: 0.1rem;
+}
+.wso-body :deep(.dim-ro-value-wrap),
+.wso-body :deep(.dim-ro-value-row) {
+    display: contents;
+}
+.wso-body :deep(.dim-ro-label) {
+    grid-area: label;
+    min-width: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 0.78rem !important;
+    font-weight: 500 !important;
+    color: var(--op-muted) !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.wso-body :deep(.dim-ro-value) {
+    grid-area: value;
+    font-size: 1.15rem !important;
+    font-weight: 650;
+    line-height: 1.5rem !important;
+    color: var(--op-text) !important;
+    font-variant-numeric: tabular-nums;
+}
+.wso-body :deep(.dim-ro-unit),
+.wso-body :deep(.dim-ro-unit .p-select-label) {
+    grid-area: unit;
+    justify-self: start;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 0.8rem !important;
+    line-height: 1.5rem !important;
+    color: var(--op-muted) !important;
 }
 </style>
-

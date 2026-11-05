@@ -7,20 +7,21 @@
  * floor (OperatingPoints built `errorMessages` that nothing rendered). Users
  * were left hunting for the offending field.
  *
- * These lock down that the reasons reach the sidebar panel and name something
- * the user can act on.
+ * These lock down that the reasons reach the user (as ERROR records of the
+ * "Design step" module in the Engine log, opened from the footer) and name
+ * something the user can act on.
  */
 import { test, expect } from './_coverage.js';
 import { BASE_URL } from './utils/env.js';
-import { withPinia } from './utils/index.js';
+import { withPinia, engineLogMessages } from './utils/index.js';
 
-const panelItems = (page) => page.locator('[data-cy$="-StorylineErrors-list"] li');
+const panelItems = (page) => page.locator('[data-cy="EngineLogPanel-record"]').filter({ hasText: 'Design step' });
 
-// The sidebar card is only a summary; the readable list lives in the dialog.
+// The reasons are records in the Engine log, opened from its footer button.
 async function openErrorDetails(page) {
-  const card = page.locator('[data-cy$="-StorylineErrors-open"]').first();
-  await card.waitFor({ state: 'visible', timeout: 20000 });
-  await card.click();
+  const toggle = page.locator('[data-cy="EngineLogPanel-toggle"]');
+  await toggle.waitFor({ state: 'visible', timeout: 20000 });
+  await toggle.click();
   await panelItems(page).first().waitFor({ state: 'visible', timeout: 20000 });
 }
 
@@ -55,7 +56,7 @@ test('Design Requirements names each blocking requirement @layout', async ({ pag
   await expect(page.locator('[data-cy="magnetic-synthesis-next-tool-button"]').first()).toHaveText(/Fix Errors/i);
 });
 
-test('Operating Points reasons reach the panel @layout', async ({ page }) => {
+test('Operating Points reasons reach the Engine log @layout', async ({ page }) => {
   await openMagneticTool(page);
 
   await page.evaluate(() => {
@@ -72,7 +73,7 @@ test('Operating Points reasons reach the panel @layout', async ({ page }) => {
          `items: ${JSON.stringify(items)}`).toBe(true);
 });
 
-test('the panel is hidden once the step is valid @layout', async ({ page }) => {
+test('the reasons leave the Engine log once the step is valid @layout', async ({ page }) => {
   await openMagneticTool(page);
 
   await withPinia(page, (pinia) => {
@@ -83,5 +84,47 @@ test('the panel is hidden once the step is valid @layout', async ({ page }) => {
     return true;
   });
 
-  await expect(page.locator('[data-cy$="-StorylineErrors-panel"]')).toHaveCount(0, { timeout: 20000 });
+  await expect.poll(() => withPinia(page, (pinia) =>
+    pinia._s.get('engineDiagnostics').records.filter((r) => r.module === 'Design step').length),
+  { timeout: 20000 }).toBe(0);
+});
+
+// User report 2026-11-03: the Summary step always said "1 thing to fix before continuing / This
+// step is not complete yet". Steps start as not complete and the Summary never reported, so the
+// last page of every finished design claimed something was wrong without saying what.
+const SUMMARY_FIXTURE = new URL('./fixtures/etd49_wound_10uH_5T.json', import.meta.url).pathname;
+
+async function openSummary(page) {
+  await withPinia(page, (pinia) => {
+    pinia._s.get('state').getCurrentToolState().subsection = 'magneticSummary';
+    return true;
+  });
+}
+
+test('SUMMARY-STEP-1: a finished design reaches the Summary with nothing to fix @layout', async ({ page }) => {
+  test.setTimeout(180000);
+  await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('[data-cy="Header-Load-MAS-file-button"]').setInputFiles(SUMMARY_FIXTURE);
+  await page.waitForURL('**/magnetic_tool**', { timeout: 60000 });
+  await expect.poll(() => withPinia(page, (pinia) => pinia._s.get('mas').mas.outputs.length),
+    { message: 'the builder simulates the loaded design', timeout: 90000 }).toBeGreaterThan(0);
+
+  await openSummary(page);
+  await expect.poll(() => withPinia(page, (pinia) => pinia._s.get('state').getCurrentToolState().canContinue.magneticSummary),
+    { message: 'the Summary step reports that it is complete', timeout: 30000 }).toBe(true);
+  expect(await engineLogMessages(page, { source: 'Design step' })).toEqual([]);
+});
+
+test('SUMMARY-STEP-2: the Summary of an unfinished design says what is missing @layout', async ({ page }) => {
+  await openMagneticTool(page);
+  await withPinia(page, (pinia) => {
+    pinia._s.get('mas').mas.outputs = [];
+    return true;
+  });
+  await openSummary(page);
+
+  await expect.poll(() => engineLogMessages(page, { source: 'Design step' }), { timeout: 30000 })
+    .toContainEqual(expect.stringMatching(/^Summary: The summary needs computed outputs/));
+  const messages = await engineLogMessages(page, { source: 'Design step' });
+  expect(messages.some((m) => /did not say what is missing|not complete yet/i.test(m)), JSON.stringify(messages)).toBe(false);
 });

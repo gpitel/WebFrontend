@@ -2,6 +2,7 @@
 import ConverterWaveformVisualizer from './ConverterWaveformVisualizer.vue'
 import { recordDesign } from 'WebSharedComponents/assets/js/telemetry.js'
 import { useTaskQueueStore } from '../../stores/taskQueue'
+import { useWizardInputsStore } from '../../stores/wizardInputs'
 import { toTitleCase } from 'WebSharedComponents/assets/js/utils.js'
 /**
  * ConverterWizardBase - Base layout + common logic for all converter wizards.
@@ -16,7 +17,6 @@ import { toTitleCase } from 'WebSharedComponents/assets/js/utils.js'
  *   formatFrequency, formatImpedance, formatInductance, formatCapacitance,
  *   pruneHarmonicsForInputs, processSimulatedOperatingPoints,
  *   processWaveformResults, processAnalyticalWaveforms, processSimulationWaveforms,
- *   assignResultsToMasStore, setOperatingPointsModeToManual,
  *   navigateToReview, navigateToAdvise, validateWaveforms,
  *   extractSinglePeriod, extractSinglePeriodFromOperatingPoints
  */
@@ -278,6 +278,40 @@ export default {
     };
   },
 
+  created() {
+    // A wizard reopens with the inputs it was left with (ABT #2209: users go back and forth
+    // between a wizard and the Magnetic Builder, and every visit used to start from the
+    // defaults). Every wizard keeps its form in `localData` and mounts this base as a child.
+    // Restoring here — before this component renders the wizard's input slots, and before the
+    // wizard's own mounted() auto-run — means the fields and that first run both see the
+    // restored inputs.
+    // Through `$data`: the wizards use <script setup>, which makes them closed by default, so
+    // `this.$parent` is an empty exposed proxy and `$parent.localData` reads undefined.
+    // `$data` is always reachable through it.
+    const wizard = this.$parent?.$data;
+    if (!wizard || wizard.localData === undefined) {
+      throw new Error(`ConverterWizardBase "${this.title}": the wizard that mounts it has no localData to keep`);
+    }
+    const store = useWizardInputsStore();
+    const key = this.title;
+    const stored = store.inputsByWizard[key];
+    if (stored) {
+      const wanted = Object.keys(wizard.localData).sort().join(',');
+      const found = Object.keys(stored).sort().join(',');
+      if (wanted === found) {
+        wizard.localData = JSON.parse(JSON.stringify(stored));
+      } else {
+        // Saved by a build whose wizard had other fields (a deploy also wipes this store via
+        // storeVersioning). Restoring a different shape would feed the engine a malformed spec.
+        console.warn(`[${key}] saved wizard inputs have fields [${found}] but the wizard has [${wanted}]: starting from the defaults`);
+        delete store.inputsByWizard[key];
+      }
+    }
+    this.$watch(() => wizard.localData, (inputs) => {
+      store.inputsByWizard[key] = JSON.parse(JSON.stringify(inputs));
+    }, { deep: true });
+  },
+
   methods: {
 
     /**
@@ -375,24 +409,27 @@ export default {
      */
     async ensureConverterWaveforms() {
       if (this.converterWaveforms?.length || this.lazyConverterWaveforms.length) return;
-      if (!this.converterTas || this.loadingConverterWaveforms) return;
+      if (!this.converterTas?.length || this.loadingConverterWaveforms) return;
 
       this.loadingConverterWaveforms = true;
       this.converterWaveformsError = '';
       try {
         const tqs = this.$taskQueueStore || useTaskQueueStore();
-        const result = await tqs.getComponentWaveforms(this.converterTas);
-        const period = result.referencePeriod > 0 ? result.referencePeriod : null;
-        // convertConverterWaveforms consumes one entry per operating point; component_waveforms
-        // covers the single simulated point, so wrap its payload in a one-element array.
-        const wrapped = [{
-          switchingFrequency: period ? 1 / period : undefined,
-          operatingPointName: 'Converter Nodes',
-          components: result.components || [],
-        }];
+        // One TAS per simulated operating point (one per input voltage entered, ABT #2160);
+        // component_waveforms covers one TAS, so run it per point, in the points' order.
+        const wrapped = [];
+        for (const { name, tas } of this.converterTas) {
+          const result = await tqs.getComponentWaveforms(tas);
+          const period = result.referencePeriod > 0 ? result.referencePeriod : null;
+          wrapped.push({
+            switchingFrequency: period ? 1 / period : undefined,
+            operatingPointName: this.converterTas.length > 1 ? `Converter Nodes, ${name}` : 'Converter Nodes',
+            components: result.components || [],
+          });
+        }
         let converted = this.convertConverterWaveforms(wrapped, this.getDefaultFrequencyForDisplay());
         converted = this.tileWaveformsForDisplay(converted, this.numberOfPeriods);
-        if (!converted.length || !converted[0].waveforms?.length) {
+        if (converted.length !== wrapped.length || converted.some((c) => !c.waveforms?.length)) {
           throw new Error('webKirchhoff returned no component waveforms for this design');
         }
         this.lazyConverterWaveforms = converted;
@@ -508,51 +545,13 @@ export default {
       this.resultsParamsKey = paramsKey;
       this.lastRunError = '';
       this.resultsRunId += 1;
-      
-      // Assign to masStore inputs
-      this.assignResultsToMasStore(wizardInstance, processed);
-      
-      // Set operating points mode to Manual
-      this.setOperatingPointsModeToManual(wizardInstance);
-      
+
+      // A run is a PREVIEW: its results stay on the wizard. The design (mas store) and the
+      // builder's operating-point state are written only by processWizardData, i.e. by
+      // "Design Magnetic" / "Review Specs". Writing them here replaced the design open in the
+      // builder every time a wizard merely opened (its mount-time run uses the defaults), so a
+      // finished magnetic sat against a spec the user never entered (ABT #2209).
       return processed;
-    },
-    
-    // Assign results to masStore
-    assignResultsToMasStore(wizardInstance, processed) {
-      const { operatingPoints, designRequirements } = processed;
-      
-      // Assign operating points
-      if (operatingPoints?.length > 0) {
-        // webKirchhoff/webMKF may return operating points without a name. The
-        // Magnetic Tool renders "<name> — <winding>" as the operating-point
-        // heading, so a missing name surfaces literally as "null — Primary".
-        // Name any unnamed point with the same convention the visualizer and
-        // summary already use (never clobber a name a wizard already set).
-        operatingPoints.forEach((op, idx) => {
-          if (!op.name) op.name = `Operating Point ${idx + 1}`;
-        });
-        wizardInstance.masStore.mas.inputs.operatingPoints = operatingPoints;
-      }
-      
-      // Merge design requirements
-      if (designRequirements) {
-        wizardInstance.masStore.mas.inputs.designRequirements = {
-          ...wizardInstance.masStore.mas.inputs.designRequirements,
-          ...designRequirements
-        };
-      }
-    },
-    
-    // Set all operating points to Manual mode
-    setOperatingPointsModeToManual(wizardInstance) {
-      const numPoints = wizardInstance.simulatedOperatingPoints?.length || 1;
-      wizardInstance.$stateStore.operatingPoints.modePerPoint = [];
-      for (let i = 0; i < numPoints; i++) {
-        wizardInstance.$stateStore.operatingPoints.modePerPoint.push(
-          wizardInstance.$stateStore.OperatingPointsMode.Manual
-        );
-      }
     },
     
     // ===== WAVEFORM PROCESSING FROM RESULTS =====
@@ -611,7 +610,9 @@ export default {
       // Or: { converterWaveforms: [...], operatingPoints: [...], designRequirements: {...} }
       const rawConverterWaveforms = result.converterWaveforms || [];
       // KH hands back the assembled TAS so the converter view can fetch its overlays on demand.
-      const converterTas = result.__converterTas ?? null;
+      // [{name, tas}] — one assembled TAS per simulated operating point.
+      const converterTas = result.__converterTasPerOperatingPoint
+        ?? (result.__converterTas ? [{ name: 'Converter Nodes', tas: result.__converterTas }] : null);
       const operatingPoints = result.inputs?.operatingPoints || result.operatingPoints || [];
       const designRequirements = result.inputs?.designRequirements || result.designRequirements || null;
 
@@ -821,6 +822,19 @@ export default {
       });
     },
 
+    // The hand-off (processWizardData) has just written the wizard's operating points into the
+    // design, so the builder must show every one of them as a manually defined waveform. This used
+    // to happen on every wizard run; since a run is only a preview (ABT #2209) the hand-off is the
+    // one place that does it. The state's default modes are [null] ("choose a mode"), so a guard on
+    // "already set" never fired and the builder opened asking for a mode with the Builder step locked.
+    setHandedOffOperatingPointsManual(ss, ms) {
+      const operatingPoints = ms.mas.inputs.operatingPoints;
+      if (!Array.isArray(operatingPoints) || operatingPoints.length === 0) {
+        throw new Error(`ConverterWizardBase "${this.title}": the hand-off produced no operating points`);
+      }
+      ss.operatingPoints.modePerPoint = operatingPoints.map(() => ss.OperatingPointsMode.Manual);
+    },
+
     async navigateToReview(ss, ms, appType) {
       this.trackWizardEvent('review_specs', ms);
       ss.resetMagneticTool(); ss.designLoaded();
@@ -829,14 +843,7 @@ export default {
       ss.selectWorkflow("design"); ss.selectTool("agnosticTool");
       ss.setCurrentToolSubsectionStatus("designRequirements", true);
       ss.setCurrentToolSubsectionStatus("operatingPoints", true);
-      // Only set modePerPoint if not already set (preserves mode from waveform simulation)
-      if (!ss.operatingPoints.modePerPoint || ss.operatingPoints.modePerPoint.length === 0) {
-        ss.operatingPoints.modePerPoint = [];
-        const numPoints = ms.mas.inputs.operatingPoints?.length || ms.mas.magnetic.coil.functionalDescription.length || 1;
-        for (let i = 0; i < numPoints; i++) {
-          ss.operatingPoints.modePerPoint.push(ss.OperatingPointsMode.Manual);
-        }
-      }
+      this.setHandedOffOperatingPointsManual(ss, ms);
     },
 
     async navigateToAdvise(ss, ms, appType) {
@@ -848,14 +855,7 @@ export default {
       ss.setCurrentToolSubsection("magneticBuilder");
       ss.setCurrentToolSubsectionStatus("designRequirements", true);
       ss.setCurrentToolSubsectionStatus("operatingPoints", true);
-      // Only set modePerPoint if not already set (preserves mode from waveform simulation)
-      if (!ss.operatingPoints.modePerPoint || ss.operatingPoints.modePerPoint.length === 0) {
-        const numPoints = ms.mas.inputs.operatingPoints?.length || 1;
-        ss.operatingPoints.modePerPoint = [];
-        for (let i = 0; i < numPoints; i++) {
-          ss.operatingPoints.modePerPoint.push(ss.OperatingPointsMode.Manual);
-        }
-      }
+      this.setHandedOffOperatingPointsManual(ss, ms);
     },
 
     // ===== VALIDATION =====
@@ -990,10 +990,8 @@ export default {
     async setupMasStore({ designRequirements, operatingPoints, topology, isolationSides, coilGroups, insulationType, wizardInstance: wi }) {
       // Normalize operating points to ensure processed data is properly structured.
       // Also name any unnamed point: this path REPLACES mas.inputs wholesale, and
-      // processWizardData's no-stored-data fallback builds points straight from
-      // the engine (which returns them nameless) without passing through
-      // assignResultsToMasStore — an unnamed point renders as "null — <winding>"
-      // in the Magnetic Tool heading.
+      // the engine returns them nameless, and an unnamed point renders as
+      // "null — <winding>" in the Magnetic Tool heading.
       const normalizedOperatingPoints = operatingPoints.map((op, idx) => ({
         ...op,
         name: op.name || `Operating Point ${idx + 1}`,
@@ -1500,7 +1498,7 @@ export default {
                   <ConverterWaveformVisualizer
                     :magneticWaveforms="magneticWaveforms"
                     :converterWaveforms="effectiveConverterWaveforms"
-                    :converterAvailable="!!converterTas"
+                    :converterAvailable="!!converterTas?.length"
                     :converterLoading="loadingConverterWaveforms"
                     :converterError="converterWaveformsError"
                     :viewMode="waveformViewMode"

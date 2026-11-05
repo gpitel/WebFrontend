@@ -8,7 +8,7 @@
  */
 import { test, expect } from './_coverage.js';
 import { BASE_URL } from './utils/env.js';
-import { engineLogMessages } from './utils/index.js';
+import { engineLogRecords, BUILDER_SOURCES } from './utils/index.js';
 
 const FIXTURE = new URL('./fixtures/pq2715_95_1mhz_outside_steinmetz_span.json', import.meta.url).pathname;
 
@@ -43,8 +43,15 @@ test.describe('Material data extrapolation (ABT #1652)', () => {
         const record = page.locator('[data-cy="EngineLogPanel-record"]').filter({ hasText: 'Material 95' }).first();
         await expect(record).toBeVisible({ timeout: 120000 });
         await expect(record).toContainText('extrapolated');
-        await expect(record).toContainText('1000000');
-        expect((await engineLogMessages(page, { source: 'Builder', level: 'ERROR' })).filter((m) => m.includes('MATERIAL_FREQUENCY_OUT_OF_SPAN'))).toEqual([]);
+        // One row per message, however many times the builder asks; the value asked is the part MKF
+        // keeps apart (the record's detail), shown in the row's tooltip as of its latest repeat.
+        await expect(record).toContainText('100 kHz to 500 kHz');
+        await expect(record.locator('[data-cy="EngineLogPanel-record-detail"]')).toHaveAttribute('aria-label', /^latest: asked at 1 MHz, above that span/);
+        const extrapolations = (await engineLogRecords(page, { level: 'WARNING' })).filter((r) => r.message.startsWith('Material 95: its Steinmetz loss coefficients'));
+        expect(extrapolations, 'one record for the material, counting its repeats').toHaveLength(1);
+        expect(extrapolations[0].latestDetail).toBe('asked at 1 MHz, above that span');
+        // The engine's error code is the record's code (the message is the readable part).
+        expect((await engineLogRecords(page, { source: BUILDER_SOURCES, level: 'ERROR' })).filter((r) => r.code === 'MATERIAL_FREQUENCY_OUT_OF_SPAN')).toEqual([]);
     });
 
     test('EXTRAP-2: switched off (and kept off across a reload), the engine refuses and the builder says why', async ({ page }) => {
@@ -56,7 +63,7 @@ test.describe('Material data extrapolation (ABT #1652)', () => {
         expect(await persistedChoice(page)).toBe(false);
         await loadFixtureIntoBuilder(page);
         // ... in the Engine log (Alf, 2026-10-22: not a banner over the cards).
-        await expect.poll(async () => (await engineLogMessages(page, { source: 'Builder', level: 'ERROR' })).some((m) => m.includes('MATERIAL_FREQUENCY_OUT_OF_SPAN')),
+        await expect.poll(async () => (await engineLogRecords(page, { source: BUILDER_SOURCES, level: 'ERROR' })).some((r) => r.code === 'MATERIAL_FREQUENCY_OUT_OF_SPAN'),
             { timeout: 120000 }).toBe(true);
     });
 });
